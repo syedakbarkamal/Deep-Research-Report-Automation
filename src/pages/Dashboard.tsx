@@ -1,20 +1,33 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { 
-  FileText, 
-  Plus, 
-  Search, 
+import {
+  FileText,
+  Plus,
+  Search,
   Calendar,
   ExternalLink,
   Clock,
   CheckCircle,
   AlertCircle,
-  Loader2
+  Loader2,
+  User,
+  LogOut,
+  Settings,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { supabase } from "../lib/supabaseClient";
+import { useToast } from "@/hooks/use-toast";
 
 // Mock data for demonstration
 const mockReports = [
@@ -24,7 +37,7 @@ const mockReports = [
     status: "completed",
     submittedAt: "2024-01-15 09:30",
     completedAt: "2024-01-15 09:45",
-    googleDocsUrl: "https://docs.google.com/document/d/example1"
+    googleDocsUrl: "https://docs.google.com/document/d/example1",
   },
   {
     id: 2,
@@ -32,7 +45,7 @@ const mockReports = [
     status: "processing",
     submittedAt: "2024-01-15 10:00",
     completedAt: null,
-    googleDocsUrl: null
+    googleDocsUrl: null,
   },
   {
     id: 3,
@@ -40,8 +53,8 @@ const mockReports = [
     status: "queued",
     submittedAt: "2024-01-15 10:15",
     completedAt: null,
-    googleDocsUrl: null
-  }
+    googleDocsUrl: null,
+  },
 ];
 
 const statusConfig = {
@@ -49,45 +62,138 @@ const statusConfig = {
     label: "Completed",
     icon: CheckCircle,
     variant: "default" as const,
-    color: "text-success"
+    color: "text-success",
   },
   processing: {
     label: "Processing",
     icon: Loader2,
     variant: "secondary" as const,
-    color: "text-info"
+    color: "text-info",
   },
   queued: {
     label: "Queued",
     icon: Clock,
     variant: "outline" as const,
-    color: "text-warning"
+    color: "text-warning",
   },
   error: {
     label: "Error",
     icon: AlertCircle,
     variant: "destructive" as const,
-    color: "text-destructive"
-  }
+    color: "text-destructive",
+  },
 };
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [reports] = useState(mockReports);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("user"); // 👈 default role = user
+  const navigate = useNavigate();
+  const { toast } = useToast();
+    const [users, setUsers] = useState<any[]>([]);
 
-  const filteredReports = reports.filter(report =>
+
+  // ✅ Fetch logged-in user info from Supabase
+useEffect(() => {
+    const fetchUser = async () => {
+      const localRole = localStorage.getItem("role");
+      const localEmail = localStorage.getItem("email");
+      const localName = localStorage.getItem("name");
+
+      if (localRole === "admin") {
+        setUserEmail(localEmail || "akbar.otbkamalotb@gmail.com");
+        setUserName(localName || "Admin");
+      } else {
+        const { data } = await supabase.auth.getUser();
+        if (data?.user) {
+          setUserEmail(data.user.email);
+          setUserName(data.user.user_metadata?.full_name || "User");
+        }
+      }
+    };
+    fetchUser();
+    fetchUsers();
+  }, []);
+
+  const fetchUsers = async () => {
+    const { data, error } = await supabase.from("users").select("*");
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      setUsers(data || []);
+    }
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem("role");
+    localStorage.removeItem("email");
+    localStorage.removeItem("name");
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
+  const filteredReports = reports.filter((report) =>
     report.projectName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      
-   <div className="container py-8"> <div className="flex justify-center space-x-4"> <Link to="/dashboard"> <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">  Dashboard </Button> </Link> <Link to="/admin"> <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">   Admin Panel </Button> </Link> </div>
+      {/* Top Navigation with Dashboard/Admin + User Dropdown */}
+      <div className="container py-8 flex justify-between items-center">
+        <div className="flex space-x-4">
+          <Link to="/dashboard">
+            <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
+              Dashboard
+            </Button>
+          </Link>
 
+        
+          {userRole === "admin" && (
+            <Link to="/admin">
+              <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
+                Admin Panel
+              </Button>
+            </Link>
+          )}
+        </div>
+
+        {/* ✅ User Dropdown (dynamic) */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon">
+              <User className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>
+              <div className="flex flex-col">
+                <span className="font-medium">{userName || "Guest"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {userEmail || "Not signed in"}
+                </span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
+              <Settings className="mr-2 h-4 w-4" />
+              Profile Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+              <LogOut className="mr-2 h-4 w-4" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="container">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold mb-2">Your Research Reports</h1>
-            <p className="text-muted-foreground">Track and manage all your AI-generated research reports</p>
+            <p className="text-muted-foreground">
+              Track and manage all your AI-generated research reports
+            </p>
           </div>
           <Link to="/new-report">
             <Button variant="gradient" className="mt-4 md:mt-0">
@@ -95,7 +201,6 @@ export default function Dashboard() {
               New Reports
             </Button>
           </Link>
-          
         </div>
 
         {/* Search Bar */}
@@ -125,7 +230,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-success">
-                {reports.filter(r => r.status === "completed").length}
+                {reports.filter((r) => r.status === "completed").length}
               </div>
             </CardContent>
           </Card>
@@ -135,7 +240,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-info">
-                {reports.filter(r => r.status === "processing").length}
+                {reports.filter((r) => r.status === "processing").length}
               </div>
             </CardContent>
           </Card>
@@ -145,7 +250,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-warning">
-                {reports.filter(r => r.status === "queued").length}
+                {reports.filter((r) => r.status === "queued").length}
               </div>
             </CardContent>
           </Card>
@@ -153,10 +258,10 @@ export default function Dashboard() {
 
         {/* Reports List */}
         <div className="space-y-4">
-          {filteredReports.map(report => {
+          {filteredReports.map((report) => {
             const config = statusConfig[report.status as keyof typeof statusConfig];
             const StatusIcon = config.icon;
-            
+
             return (
               <Card key={report.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader className="pb-4">
@@ -181,12 +286,18 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center space-x-3 mt-4 md:mt-0">
                       <Badge variant={config.variant} className="gap-1">
-                        <StatusIcon className={`h-3 w-3 ${report.status === 'processing' ? 'animate-spin' : ''}`} />
+                        <StatusIcon
+                          className={`h-3 w-3 ${report.status === "processing" ? "animate-spin" : ""}`}
+                        />
                         {config.label}
                       </Badge>
                       {report.googleDocsUrl && (
                         <Button variant="outline" size="sm" asChild>
-                          <a href={report.googleDocsUrl} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={report.googleDocsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
                             <ExternalLink className="h-4 w-4 mr-2" />
                             View Report
                           </a>
@@ -206,7 +317,9 @@ export default function Dashboard() {
               <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No reports found</h3>
               <p className="text-muted-foreground mb-4">
-                {searchQuery ? "Try adjusting your search" : "Create your first research report to get started"}
+                {searchQuery
+                  ? "Try adjusting your search"
+                  : "Create your first research report to get started"}
               </p>
               {!searchQuery && (
                 <Link to="/new-report">

@@ -3,10 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FileSearch, Mail, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "../lib/supabaseClient"; // Make sure this file exists
+import { supabase } from "../lib/supabaseClient";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -20,9 +21,21 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      // 🔑 Admin bypass (hardcoded check)
+      if (email === "akbar.otbkamalotb@gmail.com" && password === "admin@123") {
+        localStorage.setItem("role", "admin");
+        toast({
+          title: "Welcome Admin",
+          description: "Successfully signed in as Admin!",
+        });
+        navigate("/admin");
+        return;
+      }
+
+      // ✅ Normal user login with Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email,
-        password: password,
+        email,
+        password,
       });
 
       if (error) {
@@ -30,12 +43,12 @@ export default function Login() {
       }
 
       if (data.user) {
+        localStorage.setItem("role", "user");
         toast({
           title: "Success",
           description: "Successfully signed in!",
         });
-        // Navigate to dashboard or home page
-        navigate("/dashboard"); // Change this to your desired route
+        navigate("/dashboard");
       }
     } catch (error: any) {
       toast({
@@ -59,7 +72,7 @@ export default function Login() {
           </div>
           <CardTitle className="text-2xl">Welcome Back</CardTitle>
           <CardDescription>
-            Sign in to access your research reportss
+            Sign in to access your research reports
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -79,7 +92,7 @@ export default function Login() {
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -102,9 +115,9 @@ export default function Login() {
               </Link>
             </div>
 
-            <Button 
-              type="submit" 
-              className="w-full" 
+            <Button
+              type="submit"
+              className="w-full"
               variant="gradient"
               disabled={isLoading}
             >
