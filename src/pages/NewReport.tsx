@@ -6,9 +6,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, Link2, Trash2, Plus, Loader2, FileUp } from "lucide-react";
+import { FileText, Link2, Trash2, Plus, Loader2, FileUp, Brain } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "../lib/supabaseClient";
+import { OpenAIResearchService, ResearchPromptGenerator } from "../lib/openaiResearch";
 
 interface FormData {
   reportName: string;
@@ -17,6 +18,21 @@ interface FormData {
   meetingTranscript: string;
   clientUrls: string[];
   files: File[];
+}
+
+interface OpenAIResearchJob {
+  id: string;
+  status: 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  created_at: string;
+  updated_at: string;
+  results?: {
+    report: string;
+    sources: Array<{
+      url: string;
+      title: string;
+      snippet: string;
+    }>;
+  };
 }
 
 export default function NewReport() {
@@ -150,99 +166,264 @@ export default function NewReport() {
     return true;
   };
 
-  // Form Submit
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  if (!validateForm()) {
-    return;
-  }
+  // Extract file content for research context
+  const extractFileContent = async (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      if (file.type === 'application/pdf') {
+        // For PDF files, you would typically use a PDF parsing library
+        // For now, we'll just return the filename as context
+        resolve(`[PDF Document: ${file.name}]`);
+      } else if (file.type.includes('word') || file.type.includes('document')) {
+        // For Word documents, you would use a document parsing library
+        resolve(`[Word Document: ${file.name}]`);
+      } else if (file.type.includes('presentation')) {
+        // For PowerPoint files
+        resolve(`[PowerPoint Presentation: ${file.name}]`);
+      } else {
+        resolve(`[Document: ${file.name}]`);
+      }
+    });
+  };
 
-  setIsSubmitting(true);
+  // Submit research job to OpenAI Deep Research API
+  const submitResearchJob = async (reportData: any, fileContents: string[]): Promise<string> => {
+    // Get system message based on report type
+    const getSystemMessage = (type: string) => {
+      const baseMessage = `You are a professional business research analyst preparing a comprehensive ${type} report. Your task is to analyze the provided materials and conduct thorough web research to create a detailed, data-driven business report.
 
-  try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      throw new Error("Please sign in to create a report");
-    }
+Key Requirements:
+- Focus on actionable insights with specific data, statistics, and trends
+- Include inline citations for all claims and data points
+- Provide structured analysis with clear sections and headers
+- Support recommendations with evidence from reliable sources
+- Format the output as a professional business report`;
 
-    // Skip file upload for now - just use empty array
-    // Upload files to Supabase Storage
-const fileUrls: string[] = [];
+      switch (type) {
+        case 'American CPG Growth Plan':
+          return `${baseMessage}
 
-for (const file of formData.files) {
-  const filePath = `${user.id}/${Date.now()}-${file.name}`;
+Specific focus areas for CPG Growth Plan:
+- Market analysis and consumer behavior trends
+- Competitive landscape and positioning strategies
+- Distribution channel opportunities and challenges
+- Pricing strategies and margin analysis
+- Regulatory considerations and compliance requirements
+- Growth opportunities and market entry strategies
+- ROI projections and implementation timelines`;
 
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from("reports") // bucket name
-    .upload(filePath, file);
+        case 'American Service Growth Plan':
+          return `${baseMessage}
 
-  if (uploadError) {
-    throw new Error(`Failed to upload ${file.name}: ${uploadError.message}`);
-  }
+Specific focus areas for Service Growth Plan:
+- Service market dynamics and customer segments
+- Digital transformation opportunities in service delivery
+- Competitive analysis and differentiation strategies
+- Scalability models and operational efficiency
+- Customer acquisition and retention strategies
+- Technology integration and automation potential
+- Financial projections and growth metrics`;
 
-  // Get public URL
-  const { data: { publicUrl } } = supabase.storage
-    .from("reports")
-    .getPublicUrl(filePath);
+        case 'Relatório de Viabilidade de Expansão aos EUA':
+          return `${baseMessage}
 
-  fileUrls.push(publicUrl);
-}// Clean URLs
-const cleanUrls = formData.clientUrls
-  .filter((url) => url.trim() !== "")
-  .map((url) => url.trim());
+Responda em português. Áreas específicas de foco para o relatório de viabilidade:
+- Análise do mercado americano e oportunidades de crescimento
+- Requisitos regulatórios e considerações legais
+- Análise competitiva e estratégias de entrada no mercado
+- Considerações culturais e necessidades de localização
+- Estrutura operacional e requisitos de investimento
+- Análise de riscos e estratégias de mitigação
+- Projeções financeiras e análise de viabilidade`;
 
-
-    // Insert report into database
-    const reportData = {
-      report_name: formData.reportName.trim(),
-      client_name: formData.clientName.trim(),
-      type_of_report: formData.typeOfReport,
-      meeting_transcript: formData.meetingTranscript.trim(),
-      client_urls: cleanUrls,
-      file_urls: fileUrls, // Empty for now
-      user_id: user.id,
-      status: 'draft'
+        default:
+          return baseMessage;
+      }
     };
 
-    const { data: insertedReport, error: insertError } = await supabase
-      .from("reports")
-      .insert(reportData)
-      .select()
-      .single();
+    const systemMessage = getSystemMessage(formData.typeOfReport);
+    
+    // Construct the research prompt
+    const researchPrompt = ResearchPromptGenerator.generatePrompt(
+      formData.typeOfReport, 
+      formData.clientName,
+      formData.meetingTranscript,
+      formData.clientUrls.filter(url => url.trim()),
+      fileContents
+    );
 
-    if (insertError) {
-      console.error("Insert error:", insertError);
-      throw new Error("Failed to save report: " + insertError.message);
+    // Create research service and submit job
+    const researchService = new OpenAIResearchService(import.meta.env.VITE_OPENAI_API_KEY);
+    return await researchService.submitResearchJob(researchPrompt, systemMessage);
+  };
+
+  // Check research job status
+  const checkResearchStatus = async (jobId: string): Promise<OpenAIResearchJob> => {
+    const response = await fetch(`https://api.openai.com/v1/research/${jobId}`, {
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to check research status: ${response.status}`);
     }
 
-    toast({
-      title: "Report created successfully",
-      description: "Your research report has been saved",
-    });
+    return await response.json();
+  };
 
-    navigate(`/dashboard`);
+  // Form Submit with OpenAI Integration
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
 
-  } catch (error: any) {
-    console.error("Submit error:", error);
-    toast({
-      title: "Error creating report",
-      description: error.message || "An unexpected error occurred",
-      variant: "destructive",
-    });
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+    setIsSubmitting(true);
+
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new Error("Please sign in to create a report");
+      }
+
+      // Show progress toast
+      toast({
+        title: "Starting research process",
+        description: "Uploading files and initiating AI research...",
+      });
+
+      // Upload files to Supabase Storage
+      const fileUrls: string[] = [];
+      const fileContents: string[] = [];
+
+      for (const file of formData.files) {
+        const filePath = `${user.id}/${Date.now()}-${file.name}`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("reports")
+          .upload(filePath, file);
+
+        if (uploadError) {
+          throw new Error(`Failed to upload ${file.name}: ${uploadError.message}`);
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from("reports")
+          .getPublicUrl(filePath);
+
+        fileUrls.push(publicUrl);
+
+        // Extract file content for research context
+        const content = await extractFileContent(file);
+        fileContents.push(content);
+      }
+
+      // Clean URLs
+      const cleanUrls = formData.clientUrls
+        .filter((url) => url.trim() !== "")
+        .map((url) => url.trim());
+
+      // Prepare report data
+      const reportData = {
+        report_name: formData.reportName.trim(),
+        client_name: formData.clientName.trim(),
+        type_of_report: formData.typeOfReport,
+        meeting_transcript: formData.meetingTranscript.trim(),
+        client_urls: cleanUrls,
+        file_urls: fileUrls,
+        user_id: user.id,
+        status: 'researching' // Updated status
+      };
+
+      // Insert initial report record
+      const { data: insertedReport, error: insertError } = await supabase
+        .from("reports")
+        .insert(reportData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        throw new Error("Failed to save report: " + insertError.message);
+      }
+
+      // Submit research job to OpenAI
+      toast({
+        title: "Submitting to AI research",
+        description: "This may take several minutes to complete...",
+      });
+
+      const researchJobId = await submitResearchJob(reportData, fileContents);
+
+      // Update report with research job ID
+      const { error: updateError } = await supabase
+        .from("reports")
+        .update({ 
+          openai_job_id: researchJobId,
+          status: 'researching',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', insertedReport.id);
+
+      if (updateError) {
+        console.error("Update error:", updateError);
+        // Don't throw here, as the research is already started
+      }
+
+      toast({
+        title: "Research initiated successfully",
+        description: "Your AI research report is being generated. You'll be notified when it's ready.",
+      });
+
+      // Navigate to dashboard with a flag to show the research status
+      navigate(`/dashboard?research_started=${insertedReport.id}`);
+
+    } catch (error: any) {
+      console.error("Submit error:", error);
+      toast({
+        title: "Error creating report",
+        description: error.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-subtle py-8">
       <div className="container max-w-4xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Create New Research Report</h1>
-          <p className="text-muted-foreground">
-            Submit your materials and let AI generate a comprehensive research report
-          </p>
+          <div className="flex items-center gap-3 mb-4">
+            <Brain className="h-8 w-8 text-primary" />
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Create New Research Report</h1>
+              <p className="text-muted-foreground">
+                Submit your materials and let OpenAI Deep Research generate a comprehensive analysis
+              </p>
+            </div>
+          </div>
+          
+          {/* Research Process Info */}
+          <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3">
+                <Brain className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                    AI-Powered Research Process
+                  </h3>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    Once submitted, our AI will analyze your materials, conduct web research, 
+                    and generate a comprehensive report. This typically takes 5-15 minutes depending 
+                    on complexity.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -308,14 +489,16 @@ const cleanUrls = formData.clientUrls
           <Card>
             <CardHeader>
               <CardTitle>Meeting Transcript</CardTitle>
-              <CardDescription>Paste your meeting transcript or notes</CardDescription>
+              <CardDescription>
+                Paste your meeting transcript or notes - this will be the primary source for AI research
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 <Label htmlFor="transcript">Transcript *</Label>
                 <Textarea
                   id="transcript"
-                  placeholder="Paste your meeting transcript here..."
+                  placeholder="Paste your meeting transcript here... The AI will use this as the foundation for research and analysis."
                   value={formData.meetingTranscript}
                   onChange={(e) => setFormData({ ...formData, meetingTranscript: e.target.value })}
                   className="min-h-[200px]"
@@ -330,7 +513,7 @@ const cleanUrls = formData.clientUrls
           <Card>
             <CardHeader>
               <CardTitle>Reference URLs</CardTitle>
-              <CardDescription>Add relevant URLs for research (max 5)</CardDescription>
+              <CardDescription>Add relevant URLs for AI research context (max 5)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {formData.clientUrls.map((url, index) => (
@@ -378,7 +561,7 @@ const cleanUrls = formData.clientUrls
             <CardHeader>
               <CardTitle>Document Uploads</CardTitle>
               <CardDescription>
-                Upload supporting documents (PDF, DOCX, PPT - max 5 files, 10MB each)
+                Upload supporting documents for AI analysis (PDF, DOCX, PPT - max 5 files, 10MB each)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -446,15 +629,18 @@ const cleanUrls = formData.clientUrls
               type="submit" 
               variant="gradient" 
               disabled={isSubmitting} 
-              className="min-w-[150px]"
+              className="min-w-[200px]"
             >
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" /> 
-                  Creating Report...
+                  Starting AI Research...
                 </>
               ) : (
-                "Create Report"
+                <>
+                  <Brain className="h-4 w-4 mr-2" />
+                  Start AI Research
+                </>
               )}
             </Button>
           </div>

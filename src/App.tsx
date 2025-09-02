@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import NewReport from "./pages/NewReport";
 import AdminPanel from "./pages/AdminPanel";
 import NotFound from "./pages/NotFound";
+import ResearchStatusCard from "./pages/ResearchStatusCard";
 
 const queryClient = new QueryClient();
 
@@ -26,7 +27,10 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/new-report" element={<NewReport />} />
           <Route path="/admin" element={<AdminPanel />} />
+<Route path="/research-status-card" element={<ResearchStatusCard reportId={""} reportName={""} clientName={""} status={""} createdAt={""} />} />
+
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
