@@ -1,7 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,33 +35,19 @@ import {
 import { supabase } from "../lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 
-// Mock data for demonstration
-const mockReports = [
-  {
-    id: 1,
-    projectName: "Q4 Strategy Meeting Analysis",
-    status: "completed",
-    submittedAt: "2024-01-15 09:30",
-    completedAt: "2024-01-15 09:45",
-    googleDocsUrl: "https://docs.google.com/document/d/example1",
-  },
-  {
-    id: 2,
-    projectName: "Product Launch Research",
-    status: "processing",
-    submittedAt: "2024-01-15 10:00",
-    completedAt: null,
-    googleDocsUrl: null,
-  },
-  {
-    id: 3,
-    projectName: "Market Analysis Report",
-    status: "queued",
-    submittedAt: "2024-01-15 10:15",
-    completedAt: null,
-    googleDocsUrl: null,
-  },
-];
+interface Report {
+  id: string;
+  report_name: string;
+  client_name: string;
+  type_of_report: string;
+  meeting_transcript: string;
+  client_urls: string[];
+  file_urls: string[];
+  status: string;
+  created_at: string;
+  completed_at?: string | null;
+  google_docs_url?: string | null;
+}
 
 const statusConfig = {
   completed: {
@@ -86,45 +78,70 @@ const statusConfig = {
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [reports] = useState(mockReports);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>("user"); // 👈 default role = user
+  const [userRole, setUserRole] = useState<string>("user");
   const navigate = useNavigate();
   const { toast } = useToast();
-    const [users, setUsers] = useState<any[]>([]);
 
+  // ✅ Fetch logged-in user + reports
+  useEffect(() => {
+    const fetchUserAndReports = async () => {
+      try {
+        const localRole = localStorage.getItem("role");
+        const localEmail = localStorage.getItem("email");
+        const localName = localStorage.getItem("name");
 
-  // ✅ Fetch logged-in user info from Supabase
-useEffect(() => {
-    const fetchUser = async () => {
-      const localRole = localStorage.getItem("role");
-      const localEmail = localStorage.getItem("email");
-      const localName = localStorage.getItem("name");
+        let userId: string | null = null;
 
-      if (localRole === "admin") {
-        setUserEmail(localEmail || "akbar.otbkamalotb@gmail.com");
-        setUserName(localName || "Admin");
-      } else {
-        const { data } = await supabase.auth.getUser();
-        if (data?.user) {
+        if (localRole === "admin") {
+          setUserRole("admin");
+          setUserEmail(localEmail || "admin@example.com");
+          setUserName(localName || "Admin");
+        } else {
+          const { data, error } = await supabase.auth.getUser();
+          if (error || !data.user) {
+            toast({
+              title: "Error",
+              description: "You must be signed in",
+              variant: "destructive",
+            });
+            navigate("/login");
+            return;
+          }
+          userId = data.user.id;
           setUserEmail(data.user.email);
           setUserName(data.user.user_metadata?.full_name || "User");
         }
+
+        // ✅ Fetch reports (only current user unless admin)
+        let query = supabase.from("reports").select("*").order("created_at", { ascending: false });
+
+        if (userRole !== "admin" && userId) {
+          query = query.eq("user_id", userId);
+        }
+
+        const { data: reportsData, error: reportsError } = await query;
+
+        if (reportsError) {
+          throw reportsError;
+        }
+        setReports(reportsData as Report[]);
+      } catch (err: any) {
+        toast({
+          title: "Error fetching reports",
+          description: err.message,
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
       }
     };
-    fetchUser();
-    fetchUsers();
-  }, []);
 
-  const fetchUsers = async () => {
-    const { data, error } = await supabase.from("users").select("*");
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      setUsers(data || []);
-    }
-  };
+    fetchUserAndReports();
+  }, [navigate, toast, userRole]);
 
   const handleLogout = async () => {
     localStorage.removeItem("role");
@@ -133,13 +150,14 @@ useEffect(() => {
     await supabase.auth.signOut();
     navigate("/login");
   };
+
   const filteredReports = reports.filter((report) =>
-    report.projectName.toLowerCase().includes(searchQuery.toLowerCase())
+    report.report_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      {/* Top Navigation with Dashboard/Admin + User Dropdown */}
+      {/* Top Navigation */}
       <div className="container py-8 flex justify-between items-center">
         <div className="flex space-x-4">
           <Link to="/dashboard">
@@ -148,7 +166,6 @@ useEffect(() => {
             </Button>
           </Link>
 
-        
           {userRole === "admin" && (
             <Link to="/admin">
               <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
@@ -158,7 +175,7 @@ useEffect(() => {
           )}
         </div>
 
-        {/* ✅ User Dropdown (dynamic) */}
+        {/* User Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="icon">
@@ -198,7 +215,7 @@ useEffect(() => {
           <Link to="/new-report">
             <Button variant="gradient" className="mt-4 md:mt-0">
               <Plus className="h-4 w-4 mr-2" />
-              New Reports
+              New Report
             </Button>
           </Link>
         </div>
@@ -214,7 +231,7 @@ useEffect(() => {
           />
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <Card>
             <CardHeader className="pb-2">
@@ -258,80 +275,89 @@ useEffect(() => {
 
         {/* Reports List */}
         <div className="space-y-4">
-          {filteredReports.map((report) => {
-            const config = statusConfig[report.status as keyof typeof statusConfig];
-            const StatusIcon = config.icon;
+          {loading ? (
+            <Card className="text-center py-12">
+              <CardContent>
+                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-4" />
+                <p>Loading reports...</p>
+              </CardContent>
+            </Card>
+          ) : filteredReports.length > 0 ? (
+            filteredReports.map((report) => {
+              const config = statusConfig[report.status as keyof typeof statusConfig];
+              const StatusIcon = config?.icon || FileText;
 
-            return (
-              <Card key={report.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader className="pb-4">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between">
-                    <div className="flex items-start space-x-3">
-                      <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
-                      <div>
-                        <CardTitle className="text-lg">{report.projectName}</CardTitle>
-                        <div className="flex items-center space-x-4 mt-2 text-sm text-muted-foreground">
-                          <div className="flex items-center">
-                            <Calendar className="h-3 w-3 mr-1" />
-                            {report.submittedAt}
-                          </div>
-                          {report.completedAt && (
+              return (
+                <Card key={report.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between">
+                      <div className="flex items-start space-x-3">
+                        <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
+                        <div>
+                          <CardTitle className="text-lg">{report.report_name}</CardTitle>
+                          <div className="flex items-center space-x-4 mt-2 text-sm text-muted-foreground">
                             <div className="flex items-center">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              {report.completedAt}
+                              <Calendar className="h-3 w-3 mr-1" />
+                              {new Date(report.created_at).toLocaleString()}
                             </div>
-                          )}
+                            {report.completed_at && (
+                              <div className="flex items-center">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                {new Date(report.completed_at).toLocaleString()}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
+                      <div className="flex items-center space-x-3 mt-4 md:mt-0">
+                        <Badge variant={config?.variant || "outline"} className="gap-1">
+                          <StatusIcon
+                            className={`h-3 w-3 ${
+                              report.status === "processing" ? "animate-spin" : ""
+                            }`}
+                          />
+                          {config?.label || report.status}
+                        </Badge>
+                        {report.google_docs_url && (
+                          <Button variant="outline" size="sm" asChild>
+                            <a
+                              href={report.google_docs_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              View Report
+                            </a>
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-3 mt-4 md:mt-0">
-                      <Badge variant={config.variant} className="gap-1">
-                        <StatusIcon
-                          className={`h-3 w-3 ${report.status === "processing" ? "animate-spin" : ""}`}
-                        />
-                        {config.label}
-                      </Badge>
-                      {report.googleDocsUrl && (
-                        <Button variant="outline" size="sm" asChild>
-                          <a
-                            href={report.googleDocsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ExternalLink className="h-4 w-4 mr-2" />
-                            View Report
-                          </a>
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            );
-          })}
+                  </CardHeader>
+                </Card>
+              );
+            })
+          ) : (
+            <Card className="text-center py-12">
+              <CardContent>
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No reports found</h3>
+                <p className="text-muted-foreground mb-4">
+                  {searchQuery
+                    ? "Try adjusting your search"
+                    : "Create your first research report to get started"}
+                </p>
+                {!searchQuery && (
+                  <Link to="/new-report">
+                    <Button variant="gradient">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create First Report
+                    </Button>
+                  </Link>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
-
-        {filteredReports.length === 0 && (
-          <Card className="text-center py-12">
-            <CardContent>
-              <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No reports found</h3>
-              <p className="text-muted-foreground mb-4">
-                {searchQuery
-                  ? "Try adjusting your search"
-                  : "Create your first research report to get started"}
-              </p>
-              {!searchQuery && (
-                <Link to="/new-report">
-                  <Button variant="gradient">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create First Report
-                  </Button>
-                </Link>
-              )}
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   );
