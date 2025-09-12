@@ -10,6 +10,8 @@ const Index = () => {
       <Features />
       
       {/* Summary Script */}
+      
+<script src="https://apis.google.com/js/api.js"></script>
       <script>{`
         // Deep Research Report Automation - 5 Line Summary
         const app = {

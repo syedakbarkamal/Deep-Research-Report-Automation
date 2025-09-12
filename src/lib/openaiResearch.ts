@@ -31,52 +31,46 @@ export class OpenAIResearchService {
     this.apiKey = apiKey;
   }
 
-  async submitResearchJob(prompt: string, systemMessage?: string): Promise<string> {
-    const input = [
-      {
-        role: "developer",
-        content: [
-          {
-            type: "input_text",
-            text:
-              systemMessage ||
-              "You are a professional business research analyst. Provide comprehensive, well-structured research reports with citations.",
-          },
-        ],
-      },
-      {
-        role: "user",
-        content: [{ type: "input_text", text: prompt }],
-      },
-    ];
+async submitResearchJob(prompt: string, systemMessage?: string): Promise<string> {
+  const response = await fetch(`${this.baseUrl}/responses`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "o4-mini",
+      reasoning: { effort: "high" }, // 👈 must be "low" | "medium" | "high"
+      input: [
+        {
+          role: "system",
+          content:
+            systemMessage ||
+            "You are a professional business research analyst. Provide comprehensive, well-structured research reports with citations.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      tools: [{ type: "web_search_preview" }],
+      background: true,
+    }),
+  });
 
-    const response = await fetch(`${this.baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-     body: JSON.stringify({
-  model: "gpt-4o-mini",   
-  input,
-  tools: [{ type: "web_search_preview" }],
-  background: true,
-}),
-
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(
-        `OpenAI API error: ${response.status} - ${
-          errorData.error?.message || "Unknown error"
-        }`
-      );
-    }
-
-    const data = await response.json();
-    return data.id;
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      `OpenAI API error: ${response.status} - ${
+        errorData.error?.message || "Unknown error"
+      }`
+    );
   }
+
+  const data = await response.json();
+  return data.id;
+}
+
 
   async checkJobStatus(responseId: string): Promise<OpenAIResearchJob> {
     const response = await fetch(`${this.baseUrl}/responses/${responseId}`, {

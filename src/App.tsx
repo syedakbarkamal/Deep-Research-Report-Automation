@@ -11,6 +11,8 @@ import NewReport from "./pages/NewReport";
 import AdminPanel from "./pages/AdminPanel";
 import NotFound from "./pages/NotFound";
 import ResearchStatusCard from "./pages/ResearchStatusCard";
+import ReportDetails from "./pages/ReportDetails";
+import Profile from "./pages/profile";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +30,9 @@ const App = () => (
           <Route path="/new-report" element={<NewReport />} />
           <Route path="/admin" element={<AdminPanel />} />
 <Route path="/research-status-card" element={<ResearchStatusCard reportId={""} reportName={""} clientName={""} status={""} createdAt={""} />} />
+        <Route path="/report/:id" element={<ReportDetails />} />
+
+        <Route path="/profile-settings" element={<Profile />} />
 
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           

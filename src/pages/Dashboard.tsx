@@ -8,7 +8,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   FileText,
@@ -16,9 +15,6 @@ import {
   Search,
   Calendar,
   ExternalLink,
-  Clock,
-  CheckCircle,
-  AlertCircle,
   Loader2,
   User,
   LogOut,
@@ -34,8 +30,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "../lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
+import ResearchStatusCard from "./ResearchStatusCard";
 
 interface Report {
+  openai_job_id: any;
   id: string;
   report_name: string;
   client_name: string;
@@ -49,33 +47,6 @@ interface Report {
   google_docs_url?: string | null;
 }
 
-const statusConfig = {
-  completed: {
-    label: "Completed",
-    icon: CheckCircle,
-    variant: "default" as const,
-    color: "text-success",
-  },
-  processing: {
-    label: "Processing",
-    icon: Loader2,
-    variant: "secondary" as const,
-    color: "text-info",
-  },
-  queued: {
-    label: "Queued",
-    icon: Clock,
-    variant: "outline" as const,
-    color: "text-warning",
-  },
-  error: {
-    label: "Error",
-    icon: AlertCircle,
-    variant: "destructive" as const,
-    color: "text-destructive",
-  },
-};
-
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [reports, setReports] = useState<Report[]>([]);
@@ -86,7 +57,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // ✅ Fetch logged-in user + reports
+  // Fetch logged-in user + reports
   useEffect(() => {
     const fetchUserAndReports = async () => {
       try {
@@ -116,7 +87,7 @@ export default function Dashboard() {
           setUserName(data.user.user_metadata?.full_name || "User");
         }
 
-        // ✅ Fetch reports (only current user unless admin)
+        // Fetch reports (only current user unless admin)
         let query = supabase.from("reports").select("*").order("created_at", { ascending: false });
 
         if (userRole !== "admin" && userId) {
@@ -205,6 +176,7 @@ export default function Dashboard() {
       </div>
 
       <div className="container">
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold mb-2">Your Research Reports</h1>
@@ -283,59 +255,24 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           ) : filteredReports.length > 0 ? (
-            filteredReports.map((report) => {
-              const config = statusConfig[report.status as keyof typeof statusConfig];
-              const StatusIcon = config?.icon || FileText;
-
-              return (
-                <Card key={report.id} className="hover:shadow-lg transition-shadow">
-                  <CardHeader className="pb-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between">
-                      <div className="flex items-start space-x-3">
-                        <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
-                        <div>
-                          <CardTitle className="text-lg">{report.report_name}</CardTitle>
-                          <div className="flex items-center space-x-4 mt-2 text-sm text-muted-foreground">
-                            <div className="flex items-center">
-                              <Calendar className="h-3 w-3 mr-1" />
-                              {new Date(report.created_at).toLocaleString()}
-                            </div>
-                            {report.completed_at && (
-                              <div className="flex items-center">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                {new Date(report.completed_at).toLocaleString()}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3 mt-4 md:mt-0">
-                        <Badge variant={config?.variant || "outline"} className="gap-1">
-                          <StatusIcon
-                            className={`h-3 w-3 ${
-                              report.status === "processing" ? "animate-spin" : ""
-                            }`}
-                          />
-                          {config?.label || report.status}
-                        </Badge>
-                        {report.google_docs_url && (
-                          <Button variant="outline" size="sm" asChild>
-                            <a
-                              href={report.google_docs_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <ExternalLink className="h-4 w-4 mr-2" />
-                              View Report
-                            </a>
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-                </Card>
-              );
-            })
+            filteredReports.map((report) => (
+              <ResearchStatusCard
+                key={report.id}
+                reportId={report.id}
+                reportName={report.report_name}
+                clientName={report.client_name}
+                openaiJobId={report.openai_job_id}
+                status={report.status}
+                createdAt={report.created_at}
+                onStatusUpdate={(newStatus) => {
+                  setReports((prev) =>
+                    prev.map((r) =>
+                      r.id === report.id ? { ...r, status: newStatus } : r
+                    )
+                  );
+                }}
+              />
+            ))
           ) : (
             <Card className="text-center py-12">
               <CardContent>
@@ -361,4 +298,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}
+}  

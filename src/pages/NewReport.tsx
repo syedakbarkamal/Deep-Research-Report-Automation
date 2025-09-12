@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,10 +35,21 @@ interface OpenAIResearchJob {
   };
 }
 
+interface Prompt {
+  id: string;
+  title: string;
+  description?: string | null;
+  assigned_to?: string | null;
+  status: "done" | "not_done";
+  created_at?: string;
+}
+
 export default function NewReport() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableReportTypes, setAvailableReportTypes] = useState<Prompt[]>([]);
+  const [isLoadingReportTypes, setIsLoadingReportTypes] = useState(true);
 
   const [formData, setFormData] = useState<FormData>({
     reportName: "",
@@ -48,6 +59,97 @@ export default function NewReport() {
     clientUrls: [""],
     files: [],
   });
+
+  // Fetch available report types from database
+  useEffect(() => {
+    const fetchPrompts = async () => {
+      try {
+        setIsLoadingReportTypes(true);
+        const { data, error } = await supabase
+          .from("prompts")
+          .select("*")
+          .order("title", { ascending: true });
+
+        if (error) {
+          console.error("Error fetching prompts:", error);
+          toast({
+            title: "Error",
+            description: "Failed to load report types",
+            variant: "destructive",
+          });
+        } else {
+          setAvailableReportTypes(data || []);
+        }
+      } catch (err) {
+        console.error("Error fetching prompts:", err);
+      } finally {
+        setIsLoadingReportTypes(false);
+      }
+    };
+
+    fetchPrompts();
+  }, [toast]);
+
+  // Google Docs creation function
+  async function getGoogleAccessToken() {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data?.session?.provider_token) {
+      console.error("No Google access token:", error);
+      return null;
+    }
+    return data.session.provider_token; // Google OAuth token
+  }
+
+  async function createGoogleDoc(title: string, content: string) {
+    const token = await getGoogleAccessToken();
+    if (!token) throw new Error("Missing Google access token");
+
+    // 1. Create new Google Doc
+    const res = await fetch("https://docs.googleapis.com/v1/documents", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      console.error("Google Doc creation failed:", err);
+      throw new Error("Failed to create Google Doc");
+    }
+
+    const doc = await res.json();
+    const docId = doc.documentId;
+
+    // 2. Insert initial text
+    const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: content,
+            },
+          },
+        ],
+      }),
+    });
+
+    if (!updateRes.ok) {
+      const err = await updateRes.json();
+      console.error("Failed to insert text:", err);
+    }
+
+    // Return Google Docs URL instead of just ID
+    return `https://docs.google.com/document/d/${docId}/edit`;
+  }
 
   // URL Handlers
   const handleAddUrl = () => {
@@ -105,7 +207,7 @@ export default function NewReport() {
     }
 
     // Check file size (max 10MB per file)
-    const oversizedFiles = files.filter(file => file.size > 10 * 1024 * 1024);
+    const oversizedFiles = files.filter(file => file.size > 14 * 1024 * 1024);
     if (oversizedFiles.length > 0) {
       toast({
         title: "File too large",
@@ -185,11 +287,13 @@ export default function NewReport() {
     });
   };
 
-  // Submit research job to OpenAI Deep Research API
-  const submitResearchJob = async (reportData: any, fileContents: string[]): Promise<string> => {
-    // Get system message based on report type
-    const getSystemMessage = (type: string) => {
-      const baseMessage = `You are a professional business research analyst preparing a comprehensive ${type} report. Your task is to analyze the provided materials and conduct thorough web research to create a detailed, data-driven business report.
+  // Get system message based on report type
+  const getSystemMessage = (type: string) => {
+    // Try to find the prompt description for this report type
+    const prompt = availableReportTypes.find(p => p.title === type);
+    const description = prompt?.description || "";
+    
+    const baseMessage = `You are a professional business research analyst preparing a comprehensive ${type} report. Your task is to analyze the provided materials and conduct thorough web research to create a detailed, data-driven business report.
 
 Key Requirements:
 - Focus on actionable insights with specific data, statistics, and trends
@@ -198,48 +302,19 @@ Key Requirements:
 - Support recommendations with evidence from reliable sources
 - Format the output as a professional business report`;
 
-      switch (type) {
-        case 'American CPG Growth Plan':
-          return `${baseMessage}
+    // If there's a custom description for this prompt, append it
+    if (description) {
+      return `${baseMessage}
 
-Specific focus areas for CPG Growth Plan:
-- Market analysis and consumer behavior trends
-- Competitive landscape and positioning strategies
-- Distribution channel opportunities and challenges
-- Pricing strategies and margin analysis
-- Regulatory considerations and compliance requirements
-- Growth opportunities and market entry strategies
-- ROI projections and implementation timelines`;
+Specific focus areas for this report:
+${description}`;
+    }
 
-        case 'American Service Growth Plan':
-          return `${baseMessage}
+    return baseMessage;
+  };
 
-Specific focus areas for Service Growth Plan:
-- Service market dynamics and customer segments
-- Digital transformation opportunities in service delivery
-- Competitive analysis and differentiation strategies
-- Scalability models and operational efficiency
-- Customer acquisition and retention strategies
-- Technology integration and automation potential
-- Financial projections and growth metrics`;
-
-        case 'Relatório de Viabilidade de Expansão aos EUA':
-          return `${baseMessage}
-
-Responda em português. Áreas específicas de foco para o relatório de viabilidade:
-- Análise do mercado americano e oportunidades de crescimento
-- Requisitos regulatórios e considerações legais
-- Análise competitiva e estratégias de entrada no mercado
-- Considerações culturais e necessidades de localização
-- Estrutura operacional e requisitos de investimento
-- Análise de riscos e estratégias de mitigação
-- Projeções financeiras e análise de viabilidade`;
-
-        default:
-          return baseMessage;
-      }
-    };
-
+  // Submit research job to OpenAI Deep Research API
+  const submitResearchJob = async (reportData: any, fileContents: string[]): Promise<string> => {
     const systemMessage = getSystemMessage(formData.typeOfReport);
     
     // Construct the research prompt
@@ -271,7 +346,7 @@ Responda em português. Áreas específicas de foco para o relatório de viabili
     return await response.json();
   };
 
-  // Form Submit with OpenAI Integration
+  // Form Submit with OpenAI Integration and Google Docs
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -372,10 +447,59 @@ Responda em português. Áreas específicas de foco para o relatório de viabili
         // Don't throw here, as the research is already started
       }
 
-      toast({
-        title: "Research initiated successfully",
-        description: "Your AI research report is being generated. You'll be notified when it's ready.",
-      });
+      // Create Google Doc with initial content
+      try {
+        toast({
+          title: "Creating Google Doc",
+          description: "Setting up your collaborative document...",
+        });
+
+        const initialContent = `
+# ${formData.reportName}
+**Client:** ${formData.clientName}
+**Report Type:** ${formData.typeOfReport}
+**Date:** ${new Date().toLocaleDateString()}
+
+## Meeting Transcript Summary
+${formData.meetingTranscript.substring(0, 500)}${formData.meetingTranscript.length > 500 ? '...' : ''}
+
+## Research URLs
+${cleanUrls.map(url => `- ${url}`).join('\n')}
+
+## Uploaded Documents
+${formData.files.map(file => `- ${file.name}`).join('\n')}
+
+---
+*AI Research Report will be generated and appended to this document shortly...*
+        `;
+
+        const googleDocLink = await createGoogleDoc(
+          `${formData.reportName} - ${formData.clientName}`,
+          initialContent
+        );
+
+        // Update report with Google Doc link
+        await supabase
+          .from("reports")
+          .update({ 
+            google_doc_link: googleDocLink,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', insertedReport.id);
+
+        toast({
+          title: "Research initiated successfully",
+          description: "Your AI research report is being generated and Google Doc has been created!",
+        });
+
+      } catch (docError) {
+        // Google Doc creation failed, but research is still running
+        console.error("Google Doc creation failed:", docError);
+        toast({
+          title: "Research initiated successfully",
+          description: "Your AI research report is being generated. Google Doc creation encountered an issue.",
+        });
+      }
 
       // Navigate to dashboard with a flag to show the research status
       navigate(`/dashboard?research_started=${insertedReport.id}`);
@@ -418,7 +542,7 @@ Responda em português. Áreas específicas de foco para o relatório de viabili
                   <p className="text-sm text-blue-700 dark:text-blue-300">
                     Once submitted, our AI will analyze your materials, conduct web research, 
                     and generate a comprehensive report. This typically takes 5-15 minutes depending 
-                    on complexity.
+                    on complexity. A Google Doc will be created for collaborative editing.
                   </p>
                 </div>
               </div>
@@ -460,27 +584,51 @@ Responda em português. Áreas específicas de foco para o relatório de viabili
               </div>
               <div className="space-y-2 mt-4">
                 <Label htmlFor="typeOfReport">Type of report *</Label>
-                <Select
-                  value={formData.typeOfReport}
-                  onValueChange={(value) => setFormData({ ...formData, typeOfReport: value })}
-                  required
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select a report type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="American CPG Growth Plan">
-                      American CPG Growth Plan
-                    </SelectItem>
-                    <SelectItem value="American Service Growth Plan">
-                      American Service Growth Plan
-                    </SelectItem>
-                    <SelectItem value="Relatório de Viabilidade de Expansão aos EUA">
-                      Relatório de Viabilidade de Expansão aos EUA
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+              <Select
+  value={formData.typeOfReport}
+  onValueChange={(value) => setFormData({ ...formData, typeOfReport: value })}
+  required
+  disabled={isSubmitting || isLoadingReportTypes}
+>
+  <SelectTrigger className="w-full">
+    <SelectValue
+      placeholder={
+        isLoadingReportTypes
+          ? "Loading report types..."
+          : availableReportTypes.length === 0
+          ? "No report types available"
+          : "Select a report type"
+      }
+    />
+  </SelectTrigger>
+  <SelectContent>
+    {/* ✅ Static options */}
+    {/* <SelectItem value="American CPG Growth Plan">
+      American CPG Growth Plan
+    </SelectItem> */}
+    {/* <SelectItem value="American Service Growth Plan">
+      American Service Growth Plan
+    </SelectItem> */}
+    {/* <SelectItem value="Relatório de Viabilidade de Expansão aos EUA">
+      Relatório de Viabilidade de Expansão aos EUA
+    </SelectItem> */}
+
+    {/* ✅ Dynamic options (only completed prompts) */}
+    {availableReportTypes
+      .filter((prompt) => prompt.status === "done")
+      .map((prompt) => (
+        <SelectItem key={prompt.id} value={prompt.title}>
+          {prompt.title}
+        </SelectItem>
+      ))}
+  </SelectContent>
+</Select>
+
+                {availableReportTypes.length === 0 && !isLoadingReportTypes && (
+                  <p className="text-sm text-muted-foreground">
+                    No report types available. Please contact an administrator.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -628,7 +776,7 @@ Responda em português. Áreas específicas de foco para o relatório de viabili
             <Button 
               type="submit" 
               variant="gradient" 
-              disabled={isSubmitting} 
+              disabled={isSubmitting || !formData.typeOfReport} 
               className="min-w-[200px]"
             >
               {isSubmitting ? (

@@ -15,12 +15,23 @@ export function Header({ isAuthenticated = false, userRole, onLogout }: HeaderPr
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between">
-        <Link to="/" className="flex items-center space-x-2">
-          <FileSearch className="h-6 w-6 text-primary" />
-          <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            Deep Research
-          </span>
-        </Link>
+      <Link to="/" className="flex flex-col items-center space-y-1">
+  {/* Image above */}
+  <img
+    src="/soundcheckinsight.png"
+    alt="Logo"
+    className="h-10 w-60 text-primary"
+  />
+  
+  {/* Existing icon */}
+  {/* <FileSearch className="h-6 w-6 text-primary" /> */}
+  
+  {/* Text */}
+  {/* <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+    Deep Research
+  </span> */}
+</Link>
+
 
         {/* Desktop Navigation */}
         <nav className="hidden md:flex items-center space-x-6">
