@@ -287,7 +287,7 @@ export default function Dashboard() {
                   <Link to="/new-report">
                     <Button variant="gradient">
                       <Plus className="h-4 w-4 mr-2" />
-                      Create First Report
+                      Create First Reports
                     </Button>
                   </Link>
                 )}
