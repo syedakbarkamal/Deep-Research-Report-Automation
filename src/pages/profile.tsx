@@ -1,7 +1,7 @@
 // pages/profile.tsx
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
-// import Head from "next/head";
+import { useNavigate } from "react-router-dom";
 
 interface UserProfile {
   id: string;
@@ -26,18 +26,72 @@ export default function Profile() {
     confirmPassword: "",
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [emailChangePending, setEmailChangePending] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
-    getProfile();
+    // Check authentication first
+    checkAuth();
   }, []);
+
+  async function checkAuth() {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        throw error;
+      }
+      
+      if (!session) {
+        navigate("/login");
+        return;
+      }
+      
+      // If authenticated, get profile
+      getProfile();
+    } catch (error: any) {
+      console.error("Auth check error:", error);
+      navigate("/login");
+    }
+  }
+
+  async function createUserProfile(userId: string, email: string) {
+    const { data, error } = await supabase
+      .from("users")
+      .insert([
+        {
+          id: userId,
+          email: email,
+          role: "user",
+          name: "",
+          created_at: new Date().toISOString(),
+        }
+      ]);
+
+    if (error) {
+      throw error;
+    }
+    
+    return data;
+  }
 
   async function getProfile() {
     try {
       setLoading(true);
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      // Get current session first
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError) {
+        console.error("Auth error:", authError);
+        navigate("/login");
+        return;
+      }
       
       if (!authUser) {
-        window.location.href = "/login";
+        console.error("No authenticated user found");
+        navigate("/login");
         return;
       }
 
@@ -45,9 +99,10 @@ export default function Profile() {
         .from("users")
         .select("*")
         .eq("id", authUser.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
+        console.error("Database error:", error);
         throw error;
       }
 
@@ -57,9 +112,22 @@ export default function Profile() {
           name: userData.name || "",
           email: userData.email || "",
         });
+      } else {
+        // Create user profile if it doesn't exist
+        await createUserProfile(authUser.id, authUser.email || "");
+        // Recursively call getProfile to load the newly created user
+        await getProfile();
       }
     } catch (error: any) {
-      alert("Error loading profile: " + error.message);
+      console.error("Error loading profile:", error);
+      
+      // If it's an auth error, redirect to login
+      if (error.message.includes("Auth") || error.message.includes("session")) {
+        alert("Your session has expired. Please log in again.");
+        navigate("/login");
+      } else {
+        alert("Error loading profile: " + error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -67,37 +135,91 @@ export default function Profile() {
 
   async function updateProfile(e: React.FormEvent) {
     e.preventDefault();
+    
+    // Check if user exists
+    if (!user?.id) {
+      alert("User information not loaded. Please refresh the page.");
+      return;
+    }
+    
     setUpdating(true);
 
     try {
+      // Always update the name
       const { error } = await supabase
         .from("users")
         .update({
           name: formData.name,
+          updated_at: new Date().toISOString(),
         })
-        .eq("id", user?.id);
+        .eq("id", user.id);
 
       if (error) {
         throw error;
       }
 
+      // Handle email change separately with confirmation
       if (formData.email !== user?.email) {
+        setPendingEmail(formData.email);
+        
         const { error: emailError } = await supabase.auth.updateUser({
           email: formData.email,
         });
 
         if (emailError) {
+          // If email update fails, revert the email field but keep other changes
+          setFormData({ ...formData, email: user.email });
           throw emailError;
         }
+        
+        setEmailChangePending(true);
+        alert("Profile updated! A confirmation email has been sent to your new email address. Please check your inbox and confirm the change.");
+      } else {
+        alert("Profile updated successfully!");
       }
 
-      alert("Profile updated successfully!");
+      // Refresh the user data
       getProfile();
     } catch (error: any) {
-      alert("Error updating profile: " + error.message);
+      console.error("Update profile error:", error);
+      
+      // If it's an auth error, redirect to login
+      if (error.message.includes("Auth") || error.message.includes("session")) {
+        alert("Your session has expired. Please log in again.");
+        navigate("/login");
+      } else {
+        alert("Error updating profile: " + error.message);
+      }
     } finally {
       setUpdating(false);
     }
+  }
+
+  async function resendEmailConfirmation() {
+    if (!pendingEmail) return;
+    
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'email_change',
+        email: pendingEmail,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      alert("Confirmation email resent successfully! Please check your inbox.");
+    } catch (error: any) {
+      console.error("Error resending confirmation:", error);
+      alert("Error resending confirmation: " + error.message);
+    }
+  }
+
+  async function cancelEmailChange() {
+    setFormData({ ...formData, email: user?.email || "" });
+    setPendingEmail("");
+    setEmailChangePending(false);
+    alert("Email change cancelled. Your email has been reverted to the previous address.");
   }
 
   async function updatePassword(e: React.FormEvent) {
@@ -105,6 +227,11 @@ export default function Profile() {
     
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       alert("New passwords do not match.");
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      alert("Password must be at least 6 characters long.");
       return;
     }
 
@@ -126,13 +253,26 @@ export default function Profile() {
         confirmPassword: "",
       });
     } catch (error: any) {
-      alert("Error updating password: " + error.message);
+      console.error("Update password error:", error);
+      
+      // If it's an auth error, redirect to login
+      if (error.message.includes("Auth") || error.message.includes("session")) {
+        alert("Your session has expired. Please log in again.");
+        navigate("/login");
+      } else {
+        alert("Error updating password: " + error.message);
+      }
     } finally {
       setUpdating(false);
     }
   }
 
   async function deleteAccount() {
+    if (!user?.id) {
+      alert("User information not loaded. Please refresh the page.");
+      return;
+    }
+    
     if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
       return;
     }
@@ -141,25 +281,39 @@ export default function Profile() {
       const { error: userError } = await supabase
         .from("users")
         .delete()
-        .eq("id", user?.id);
+        .eq("id", user.id);
 
       if (userError) {
         throw userError;
       }
 
-      const { error: authError } = await supabase.auth.admin.deleteUser(
-        user?.id || ""
-      );
+      const { error: authError } = await supabase.auth.admin.deleteUser(user.id);
 
       if (authError) {
         throw authError;
       }
 
       alert("Account deleted successfully!");
-      window.location.href = "/";
+      
+      // Sign out and redirect to home
+      await supabase.auth.signOut();
+      navigate("/");
     } catch (error: any) {
-      alert("Error deleting account: " + error.message);
+      console.error("Error deleting account:", error);
+      
+      // If it's an auth error, redirect to login
+      if (error.message.includes("Auth") || error.message.includes("session")) {
+        alert("Your session has expired. Please log in again.");
+        navigate("/login");
+      } else {
+        alert("Error deleting account: " + error.message);
+      }
     }
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    navigate("/login");
   }
 
   if (loading) {
@@ -172,11 +326,6 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      {/* <Head>
-        <title>User Profile</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </Head> */}
-
       <div className="container max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Mobile menu button */}
         <div className="md:hidden flex justify-between items-center mb-6">
@@ -214,9 +363,15 @@ export default function Profile() {
             </div>
             <button 
               className="px-3 py-1 md:px-4 md:py-2 border border-gray-300 rounded-md hover:bg-gray-100 text-sm md:text-base"
-              onClick={() => window.location.href = "/dashboard"}
+              onClick={() => navigate("/dashboard")}
             >
               Back to Dashboard
+            </button>
+            <button 
+              className="px-3 py-1 md:px-4 md:py-2 border border-red-300 text-red-600 rounded-md hover:bg-red-50 text-sm md:text-base"
+              onClick={handleSignOut}
+            >
+              Sign Out
             </button>
           </div>
         </div>
@@ -258,6 +413,13 @@ export default function Profile() {
                   <span>⚠️</span>
                   Danger Zone
                 </button>
+                <button
+                  className="w-full flex items-center gap-2 p-3 rounded-lg text-left hover:bg-gray-100 text-red-600"
+                  onClick={handleSignOut}
+                >
+                  <span>🚪</span>
+                  Sign Out
+                </button>
               </nav>
             </div>
           )}
@@ -286,6 +448,13 @@ export default function Profile() {
                 <span>⚠️</span>
                 Danger Zone
               </button>
+              <button
+                className="w-full flex items-center gap-2 p-3 rounded-lg text-left hover:bg-gray-100 text-red-600"
+                onClick={handleSignOut}
+              >
+                <span>🚪</span>
+                Sign Out
+              </button>
             </nav>
           </div>
 
@@ -301,6 +470,30 @@ export default function Profile() {
                   </p>
                 </div>
                 <div className="p-4 md:p-6">
+                  {emailChangePending && (
+                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <h3 className="font-medium text-yellow-800 mb-2">📧 Email Change Pending</h3>
+                      <p className="text-sm text-yellow-700 mb-3">
+                        A confirmation email has been sent to <strong>{pendingEmail}</strong>. 
+                        Please check your inbox and confirm the email change to complete the process.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={resendEmailConfirmation}
+                          className="px-3 py-1 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-sm"
+                        >
+                          Resend Confirmation
+                        </button>
+                        <button
+                          onClick={cancelEmailChange}
+                          className="px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
+                        >
+                          Cancel Email Change
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   <form onSubmit={updateProfile} className="space-y-4">
                     <div className="space-y-2">
                       <label htmlFor="email" className="block font-medium text-sm md:text-base">Email Address</label>
@@ -313,8 +506,14 @@ export default function Profile() {
                           value={formData.email}
                           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                           placeholder="you@example.com"
+                          disabled={emailChangePending}
                         />
                       </div>
+                      {emailChangePending && (
+                        <p className="text-xs text-yellow-600">
+                          Email change in progress. Complete the confirmation process first.
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -351,7 +550,7 @@ export default function Profile() {
                     <button 
                       type="submit" 
                       className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm md:text-base"
-                      disabled={updating}
+                      disabled={updating || emailChangePending}
                     >
                       {updating ? "Updating..." : "Save Changes"}
                     </button>
@@ -396,7 +595,7 @@ export default function Profile() {
                           className="w-full px-3 py-2 border border-gray-300 rounded-md pl-10 text-sm md:text-base"
                           value={passwordData.newPassword}
                           onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                          placeholder="Enter new password"
+                          placeholder="Enter new password (min. 6 characters)"
                         />
                       </div>
                     </div>

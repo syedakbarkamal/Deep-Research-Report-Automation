@@ -31,46 +31,48 @@ export class OpenAIResearchService {
     this.apiKey = apiKey;
   }
 
-async submitResearchJob(prompt: string, systemMessage?: string): Promise<string> {
-  const response = await fetch(`${this.baseUrl}/responses`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "o4-mini",
-      reasoning: { effort: "high" }, // 👈 must be "low" | "medium" | "high"
-      input: [
-        {
-          role: "system",
-          content:
-            systemMessage ||
-            "You are a professional business research analyst. Provide comprehensive, well-structured research reports with citations.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      tools: [{ type: "web_search_preview" }],
-      background: true,
-    }),
-  });
+  async submitResearchJob(
+    prompt: string,
+    systemMessage?: string
+  ): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "o4-mini",
+        reasoning: { effort: "high" },
+        input: [
+          {
+            role: "system",
+            content:
+              systemMessage ||
+              "You are a professional business research analyst. Provide comprehensive, well-structured research reports with citations.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        tools: [{ type: "web_search_preview" }],
+        background: true,
+      }),
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      `OpenAI API error: ${response.status} - ${
-        errorData.error?.message || "Unknown error"
-      }`
-    );
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        `OpenAI API error: ${response.status} - ${
+          errorData.error?.message || "Unknown error"
+        }`
+      );
+    }
+
+    const data = await response.json();
+    return data.id;
   }
-
-  const data = await response.json();
-  return data.id;
-}
-
 
   async checkJobStatus(responseId: string): Promise<OpenAIResearchJob> {
     const response = await fetch(`${this.baseUrl}/responses/${responseId}`, {
@@ -82,6 +84,9 @@ async submitResearchJob(prompt: string, systemMessage?: string): Promise<string>
     }
 
     const data = await response.json();
+
+    // Debugging — check exact API response
+    console.log("🔍 OpenAI Job Data:", JSON.stringify(data, null, 2));
 
     const transformedJob: OpenAIResearchJob = {
       id: data.id,
@@ -97,45 +102,56 @@ async submitResearchJob(prompt: string, systemMessage?: string): Promise<string>
       updated_at: data.updated_at || data.created_at,
     };
 
+    // ✅ Parse output if job completed
     if (data.status === "completed" && data.output) {
-      const finalOutput = data.output.find(
-        (item: any) =>
-          item.type === "response" ||
-          (item.content &&
-            Array.isArray(item.content) &&
-            item.content.some((c: any) => c.type === "text"))
-      );
+      let reportText = "";
+      let sources = [];
 
-      if (finalOutput) {
-        let reportText = "";
-        if (finalOutput.content && Array.isArray(finalOutput.content)) {
-          reportText = finalOutput.content
-            .filter((c: any) => c.type === "text")
-            .map((c: any) => c.text)
-            .join("\n");
-        }
-
-        const sources = data.output
-          .filter(
-            (item: any) =>
-              item.type === "tool_call" &&
-              item.tool_call?.name === "web_search_preview"
-          )
+      // Handle different possible output structures
+      if (Array.isArray(data.output)) {
+        // Extract text content from all output items
+        reportText = data.output
           .map((item: any) => {
-            const result = item.tool_call?.result;
-            if (result && result.results) {
-              return result.results.map((r: any) => ({
-                url: r.url || "",
-                title: r.title || "",
-                snippet: r.snippet || r.body || "",
-              }));
+            if (item.role === "assistant" && item.content) {
+              // Handle both string and array content formats
+              if (Array.isArray(item.content)) {
+                return item.content
+                  .filter((c: any) => c.type === "text" || c.type === "output_text")
+                  .map((c: any) => c.text || c.output_text || "")
+                  .join("\n");
+              } else if (typeof item.content === "string") {
+                return item.content;
+              }
             }
-            return [];
+            return "";
           })
-          .flat();
+          .filter((text: string) => text.length > 0)
+          .join("\n\n");
 
-        transformedJob.results = { report: reportText, sources };
+        // Extract sources from tool calls
+        sources = data.output
+          .flatMap((item: any) => item.tool_calls || [])
+          .filter((tool: any) => tool.type === "function" && tool.function?.name === "web_search_preview")
+          .flatMap((tool: any) => {
+            try {
+              const result = JSON.parse(tool.function.arguments);
+              return result.results || [];
+            } catch (e) {
+              console.error("Error parsing tool arguments:", e);
+              return [];
+            }
+          })
+          .map((r: any) => ({
+            url: r.url || "",
+            title: r.title || "",
+            snippet: r.snippet || r.body || "",
+          }));
+      } else if (typeof data.output === "string") {
+        // Handle case where output is a simple string
+        reportText = data.output;
       }
+
+      transformedJob.results = { report: reportText, sources };
     }
 
     if (data.status === "failed" && data.error) {
@@ -149,10 +165,13 @@ async submitResearchJob(prompt: string, systemMessage?: string): Promise<string>
   }
 
   async cancelJob(responseId: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/responses/${responseId}/cancel`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const response = await fetch(
+      `${this.baseUrl}/responses/${responseId}/cancel`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`Failed to cancel research job: ${response.status}`);
@@ -250,7 +269,10 @@ export const updateReportWithResearchResults = async (
     updateData.error_message = job.error?.message || "Research job failed";
   }
 
-  const { error } = await supabase.from("reports").update(updateData).eq("id", reportId);
+  const { error } = await supabase
+    .from("reports")
+    .update(updateData)
+    .eq("id", reportId);
 
   if (error) {
     console.error("Failed to update report:", error);
@@ -259,8 +281,8 @@ export const updateReportWithResearchResults = async (
 };
 
 export default OpenAIResearchService;
-// lib/openaiResearch.ts ke andar, OpenAIResearchService ke neeche ya end me
 
+// Prompt Generator
 export class ResearchPromptGenerator {
   static generatePrompt(
     reportType: string,
@@ -280,7 +302,11 @@ export class ResearchPromptGenerator {
       ${urls && urls.length > 0 ? urls.join("\n") : "No URLs provided"}
 
       Uploaded Documents:
-      ${fileContents && fileContents.length > 0 ? fileContents.join("\n") : "No documents uploaded"}
+      ${
+        fileContents && fileContents.length > 0
+          ? fileContents.join("\n")
+          : "No documents uploaded"
+      }
     `;
   }
 }

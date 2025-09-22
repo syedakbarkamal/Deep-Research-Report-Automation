@@ -48,59 +48,94 @@ export default function ReportDetails() {
   }, [id]);
 
   // Create Google Doc
-const handleCreateDoc = async () => {
-  if (!googleInitialized || !report) return;
-  setCreatingDoc(true);
+  const handleCreateDoc = async () => {
+    if (!googleInitialized || !report) return;
+    setCreatingDoc(true);
 
-  try {
-    await signIn();
+    try {
+      await signIn();
 
-    // Only include report_name and meeting_transcript
-    const docContent = `
-      Report Name: ${report.report_name || "Untitled Report"}\n
-      Meeting Transcript:\n${report.meeting_transcript || "No transcript available."}
-    `;
+      // --- FORMAT CONTENT LIKE renderFormattedField ---
+      const lines = (report.generated_report || "").split("\n");
+      const formattedContent = lines
+        .map((line) => {
+          if (line.startsWith("## ")) {
+            return `\n**${line.replace("## ", "")}**\n`; // Bold for h2
+          }
+          if (line.startsWith("### ")) {
+            return `\n*${line.replace("### ", "")}*\n`; // Italic for h3
+          }
+          return line; // Normal text
+        })
+        .join("\n");
 
-    const url = await createGoogleDoc(
-      report.report_name || "Report",
-      docContent
-    );
+      // --- FINAL DOC CONTENT ---
+      const docContent = `
+Report Type: ${report.type_of_report || "Untitled Report"}
 
-    // Save URL in Supabase
-    const { error } = await supabase
-      .from("reports")
-      .update({ google_docs_url: url })
-      .eq("id", id);
+Generated Report:
+${formattedContent}
+      `;
 
-    if (error) {
-      console.error("Error updating Supabase:", error.message);
-    } else {
-      setReport({ ...report, google_docs_url: url });
+      const url = await createGoogleDoc(
+        report.type_of_report || "Report",
+        docContent
+      );
+
+      // Save URL in Supabase
+      const { error } = await supabase
+        .from("reports")
+        .update({ google_docs_url: url })
+        .eq("id", id);
+
+      if (error) {
+        console.error("Error updating Supabase:", error.message);
+      } else {
+        setReport({ ...report, google_docs_url: url });
+      }
+    } catch (err) {
+      console.error("Error creating Google Doc:", err);
+    } finally {
+      setCreatingDoc(false);
     }
-  } catch (err) {
-    console.error("Error creating Google Doc:", err);
-  } finally {
-    setCreatingDoc(false);
-  }
-};
-
-
-
-
+  };
 
   if (loading) return <p className="p-6">Loading...</p>;
   if (!report) return <p className="p-6">Report not found</p>;
 
-  // Helper to render fields
-  const renderField = (label: string, value: any, bg: string) => {
+  // Helper to render fields as plain text with h2/h3
+  const renderFormattedField = (label: string, value: any, bg: string) => {
     if (!value) return null;
+
+    const formatted = value
+      .split("\n")
+      .map((line: string, idx: number) => {
+        if (line.startsWith("## ")) {
+          return (
+            <h2 key={idx} className="text-lg font-semibold mt-4 mb-2">
+              {line.replace("## ", "")}
+            </h2>
+          );
+        }
+        if (line.startsWith("### ")) {
+          return (
+            <h3 key={idx} className="text-base font-medium mt-3 mb-1">
+              {line.replace("### ", "")}
+            </h3>
+          );
+        }
+        return (
+          <p key={idx} className="text-sm leading-relaxed mb-2">
+            {line}
+          </p>
+        );
+      });
+
     return (
       <div className="mt-6">
         <strong>{label}:</strong>
         <div className={`mt-3 p-4 border rounded-lg ${bg}`}>
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-            {value}
-          </pre>
+          {formatted}
         </div>
       </div>
     );
@@ -109,7 +144,11 @@ const handleCreateDoc = async () => {
   return (
     <Card className="m-6">
       <CardHeader>
-        <CardTitle>{report.report_name || "Untitled Report"}</CardTitle>
+        <CardTitle>
+          <h1 className="text-2xl font-bold">
+            {report.type_of_report || "Untitled Report"}
+          </h1>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {report.client_name && (
@@ -129,21 +168,12 @@ const handleCreateDoc = async () => {
           </p>
         )}
 
-        {/* Render known fields with color backgrounds */}
-        {renderField("AI Generated Report", report.ai_generated_content, "bg-blue-50 border-blue-200")}
-        {renderField("Report Content", report.report_content, "bg-green-50 border-green-200")}
-        {renderField("Analysis", report.analysis, "bg-purple-50 border-purple-200")}
-        {renderField("Summary", report.summary, "bg-yellow-50 border-yellow-200")}
-
-        {/* Show all fields for debugging */}
-        <details className="mt-6">
-          <summary className="cursor-pointer font-semibold text-gray-600">
-            Show All Fields (debug)
-          </summary>
-          <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto max-h-60">
-            {JSON.stringify(report, null, 2)}
-          </pre>
-        </details>
+        {/* Render generated_report with formatting */}
+        {/* {renderFormattedField(
+          "Generated Report",
+          report.generated_report,
+          "bg-blue-50 border-blue-200"
+        )} */}
 
         {/* Google Doc Section */}
         {report.google_docs_url ? (

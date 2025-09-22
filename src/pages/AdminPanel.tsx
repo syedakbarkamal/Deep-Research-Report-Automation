@@ -42,11 +42,10 @@ import {
   ChevronDown,
   Menu,
   Search,
+  FileCode,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-
-const defaultPrompt = ``;
 
 type UserRow = {
   id: string;
@@ -57,12 +56,13 @@ type UserRow = {
   report_count?: number;
 };
 
-type PromptRow = {
+type ReportType = {
   id: string;
   title: string;
   description?: string | null;
+  prompt: string;
   assigned_to?: string[] | null;
-  status: "done" | "not_done";
+  status: "active" | "inactive";
   created_at?: string;
 };
 
@@ -140,7 +140,7 @@ const UserMultiSelect = ({
               {user.name} — {user.email}
             </div>
           ))}
-          
+                    
           {unselectedUsers.map(user => (
             <div
               key={user.id}
@@ -160,20 +160,19 @@ const UserMultiSelect = ({
 export default function AdminPanel() {
   const { toast } = useToast();
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [masterPrompt, setMasterPrompt] = useState(defaultPrompt);
-  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
+  const [reportTypeFilter, setReportTypeFilter] = useState<"all" | "active" | "inactive">("all");
 
-  // new prompt management state
-  const [prompts, setPrompts] = useState<PromptRow[]>([]);
-  const [newPromptTitle, setNewPromptTitle] = useState("");
-  const [newPromptDescription, setNewPromptDescription] = useState("");
+  // new report type management state
+  const [newReportTypeTitle, setNewReportTypeTitle] = useState("");
+  const [newReportTypeDescription, setNewReportTypeDescription] = useState("");
+  const [newReportTypePrompt, setNewReportTypePrompt] = useState("");
   const [assignUserIds, setAssignUserIds] = useState<string[]>([]);
-  const [promptFilter, setPromptFilter] = useState<"all" | "done" | "not_done">(
-    "all"
-  );
-  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
-  const [editPromptTitle, setEditPromptTitle] = useState("");
-  const [editPromptDescription, setEditPromptDescription] = useState("");
+
+  const [editingReportTypeId, setEditingReportTypeId] = useState<string | null>(null);
+  const [editReportTypeTitle, setEditReportTypeTitle] = useState("");
+  const [editReportTypeDescription, setEditReportTypeDescription] = useState("");
+  const [editReportTypePrompt, setEditReportTypePrompt] = useState("");
   const [editAssignUserIds, setEditAssignUserIds] = useState<string[]>([]);
 
   // user create/edit states
@@ -217,7 +216,7 @@ export default function AdminPanel() {
             .select("role")
             .eq("id", data.user.id)
             .single();
-          
+
           setUserRole(userData?.role || "user");
           setUserEmail(data.user.email);
           setUserName(data.user.user_metadata?.full_name || "User");
@@ -227,20 +226,48 @@ export default function AdminPanel() {
 
     fetchUser();
     fetchUsers();
-    fetchPrompts();
+    fetchReportTypes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** ------------------------
+  /**
+   * ------------------------
    * Users
    * -------------------------*/
   const fetchUsers = async () => {
-    const { data, error } = await supabase.from("users").select("*");
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      setUsers((data as UserRow[]) || []);
+    // First get all users
+    const { data: usersData, error: usersError } = await supabase
+      .from("users")
+      .select("*");
+
+    if (usersError) {
+      toast({ title: "Error", description: usersError.message, variant: "destructive" });
+      return;
     }
+
+    // Then get report counts for each user
+    const { data: reportsData, error: reportsError } = await supabase
+      .from("reports")
+      .select("user_id");
+
+    if (reportsError) {
+      toast({ title: "Error", description: reportsError.message, variant: "destructive" });
+      return;
+    }
+
+    // Count reports per user
+    const reportCounts: Record<string, number> = {};
+    reportsData?.forEach((report) => {
+      reportCounts[report.user_id] = (reportCounts[report.user_id] || 0) + 1;
+    });
+
+    // Merge counts with user data
+    const usersWithCounts = usersData?.map(user => ({
+      ...user,
+      report_count: reportCounts[user.id] || 0
+    })) as UserRow[];
+
+    setUsers(usersWithCounts || []);
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -261,9 +288,9 @@ export default function AdminPanel() {
     } else {
       toast({ title: "User Deleted" });
       fetchUsers();
-      // also unassign prompts assigned to that user (optional)
-      await supabase.from("prompts").update({ assigned_to: null }).eq("assigned_to", userId);
-      fetchPrompts();
+      // also unassign report types assigned to that user
+      await supabase.from("report_types").update({ assigned_to: null }).eq("assigned_to", userId);
+      fetchReportTypes();
     }
   };
 
@@ -308,28 +335,59 @@ export default function AdminPanel() {
       return;
     }
 
-    // NOTE: In production you should sign up via supabase.auth.signUp and not store raw password in a table.
-    const { error } = await supabase.from("users").insert([
-      {
-        name: newName,
+    try {
+      // First create the auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: newEmail,
         password: newPassword,
-        role: newUserRole,
-        created_at: new Date().toISOString(),
-        report_count: 0,
-      },
-    ]);
+        options: {
+          data: {
+            full_name: newName,
+          }
+        }
+      });
 
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "User Added", description: `${newName} has been added.` });
-      setNewName("");
-      setNewEmail("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setNewUserRole("user");
-      fetchUsers();
+      if (authError) {
+        throw authError;
+      }
+
+      if (authData.user) {
+        // Then create the user record in your users table
+        const { error: userError } = await supabase.from("users").insert([
+          {
+            id: authData.user.id, // Use the same ID as the auth user
+            name: newName,
+            email: newEmail,
+            role: newUserRole,
+            created_at: new Date().toISOString(),
+            report_count: 0,
+          },
+        ]);
+
+        if (userError) {
+          // If user creation fails, try to delete the auth user
+          await supabase.auth.admin.deleteUser(authData.user.id);
+          throw userError;
+        }
+
+        toast({ 
+          title: "User Added", 
+          description: `${newName} has been added. They should check their email to confirm their account.` 
+        });
+
+        setNewName("");
+        setNewEmail("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setNewUserRole("user");
+        fetchUsers();
+      }
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message, 
+        variant: "destructive" 
+      });
     }
   };
 
@@ -372,132 +430,157 @@ export default function AdminPanel() {
       return;
     }
 
-    const updateData: any = { name: editName, email: editEmail, role: editRole };
-    if (editPassword) updateData.password = editPassword;
+    try {
+      const updateData: any = { name: editName, email: editEmail, role: editRole };
 
-    const { error } = await supabase.from("users").update(updateData).eq("id", userId);
+      // Update the user record
+      const { error } = await supabase.from("users").update(updateData).eq("id", userId);
 
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
+      if (error) {
+        throw error;
+      }
+
+      // If password was changed, update it in auth
+      if (editPassword) {
+        const { error: authError } = await supabase.auth.admin.updateUserById(
+          userId,
+          { password: editPassword }
+        );
+
+        if (authError) {
+          toast({ 
+            title: "Warning", 
+            description: "User details updated but password change failed: " + authError.message 
+          });
+        }
+      }
+
       toast({ title: "User Updated", description: `${editName} has been updated.` });
       setEditingUserId(null);
       fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
 
-  /** ------------------------
-   * Prompts management
+  /**
+   * ------------------------
+   * Report Types management
    * -------------------------*/
-  const fetchPrompts = async () => {
+  const fetchReportTypes = async () => {
     const { data, error } = await supabase
-      .from("prompts")
+      .from("report_types")
       .select("*")
       .order("created_at", { ascending: false });
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      setPrompts((data as PromptRow[]) || []);
+      setReportTypes((data as ReportType[]) || []);
     }
   };
 
-  const handleCreatePrompt = async () => {
-    if (!newPromptTitle) {
-      toast({ title: "Error", description: "Prompt title is required", variant: "destructive" });
+  const handleCreateReportType = async () => {
+    if (!newReportTypeTitle || !newReportTypePrompt) {
+      toast({ title: "Error", description: "Report type name and prompt are required", variant: "destructive" });
       return;
     }
-    
+
     // Convert assigned user IDs to array format
     const assignedUsersArray = assignUserIds.length > 0 ? assignUserIds : null;
-    
-    const { error } = await supabase.from("prompts").insert([
+
+    const { error } = await supabase.from("report_types").insert([
       {
-        title: newPromptTitle,
-        description: newPromptDescription,
+        title: newReportTypeTitle,
+        description: newReportTypeDescription,
+        prompt: newReportTypePrompt,
         assigned_to: assignedUsersArray,
-        status: "not_done",
+        status: "active",
         created_at: new Date().toISOString(),
       },
     ]);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Prompt Added" });
-      setNewPromptTitle("");
-      setNewPromptDescription("");
+      toast({ title: "Report Type Created" });
+      setNewReportTypeTitle("");
+      setNewReportTypeDescription("");
+      setNewReportTypePrompt("");
       setAssignUserIds([]);
-      fetchPrompts();
+      fetchReportTypes();
     }
   };
 
-  const handleDeletePrompt = async (promptId: string) => {
-    const { error } = await supabase.from("prompts").delete().eq("id", promptId);
+  const handleDeleteReportType = async (reportTypeId: string) => {
+    const { error } = await supabase.from("report_types").delete().eq("id", reportTypeId);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Prompt Deleted" });
-      fetchPrompts();
+      toast({ title: "Report Type Deleted" });
+      fetchReportTypes();
     }
   };
 
-  const togglePromptStatus = async (prompt: PromptRow) => {
-    const newStatus = prompt.status === "done" ? "not_done" : "done";
-    const { error } = await supabase.from("prompts").update({ status: newStatus }).eq("id", prompt.id);
+  const toggleReportTypeStatus = async (reportType: ReportType) => {
+    const newStatus = reportType.status === "active" ? "inactive" : "active";
+    const { error } = await supabase.from("report_types").update({ status: newStatus }).eq("id", reportType.id);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: `Marked ${newStatus.replace("_", " ")}` });
-      fetchPrompts();
+      toast({ title: `Marked ${newStatus}` });
+      fetchReportTypes();
     }
   };
 
-  const handleAssignPromptToUsers = async (promptId: string, userIds: string[]) => {
+  const handleAssignReportTypeToUsers = async (reportTypeId: string, userIds: string[]) => {
     const assignedUsersArray = userIds.length > 0 ? userIds : null;
-    const { error } = await supabase.from("prompts").update({ assigned_to: assignedUsersArray }).eq("id", promptId);
+    const { error } = await supabase.from("report_types").update({ assigned_to: assignedUsersArray }).eq("id", reportTypeId);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Assignment Updated" });
-      fetchPrompts();
+      fetchReportTypes();
     }
   };
 
-  const startEditPrompt = (p: PromptRow) => {
-    setEditingPromptId(p.id);
-    setEditPromptTitle(p.title || "");
-    setEditPromptDescription(p.description || "");
-    setEditAssignUserIds(p.assigned_to || []);
+  const startEditReportType = (rt: ReportType) => {
+    setEditingReportTypeId(rt.id);
+    setEditReportTypeTitle(rt.title || "");
+    setEditReportTypeDescription(rt.description || "");
+    setEditReportTypePrompt(rt.prompt || "");
+    setEditAssignUserIds(rt.assigned_to || []);
   };
 
-  const cancelEditPrompt = () => {
-    setEditingPromptId(null);
-    setEditPromptTitle("");
-    setEditPromptDescription("");
+  const cancelEditReportType = () => {
+    setEditingReportTypeId(null);
+    setEditReportTypeTitle("");
+    setEditReportTypeDescription("");
+    setEditReportTypePrompt("");
     setEditAssignUserIds([]);
   };
 
-  const saveEditedPrompt = async (promptId: string) => {
-    if (!editPromptTitle) {
-      toast({ title: "Error", description: "Title cannot be empty", variant: "destructive" });
+  const saveEditedReportType = async (reportTypeId: string) => {
+    if (!editReportTypeTitle || !editReportTypePrompt) {
+      toast({ title: "Error", description: "Title and prompt cannot be empty", variant: "destructive" });
       return;
     }
-    
+
     const assignedUsersArray = editAssignUserIds.length > 0 ? editAssignUserIds : null;
-    
+
     const { error } = await supabase
-      .from("prompts")
+      .from("report_types")
       .update({ 
-        title: editPromptTitle, 
-        description: editPromptDescription,
+        title: editReportTypeTitle,
+        description: editReportTypeDescription,
+        prompt: editReportTypePrompt,
         assigned_to: assignedUsersArray
       })
-      .eq("id", promptId);
+      .eq("id", reportTypeId);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Prompt Updated" });
-      cancelEditPrompt();
-      fetchPrompts();
+      toast({ title: "Report Type Updated" });
+      cancelEditReportType();
+      fetchReportTypes();
     }
   };
 
@@ -509,19 +592,10 @@ export default function AdminPanel() {
     navigate("/login");
   };
 
-  const handleSaveMasterPrompt = () => {
-    setIsEditingPrompt(false);
-    toast({
-      title: "Prompt Updated",
-      description: "The master research prompt has been saved successfully.",
-    });
-    // Optionally: persist to a config table in supabase
-  };
-
-  const filteredPrompts =
-    promptFilter === "all"
-      ? prompts
-      : prompts.filter((p) => p.status === promptFilter);
+  const filteredReportTypes = 
+    reportTypeFilter === "all"
+      ? reportTypes
+      : reportTypes.filter((rt) => rt.status === reportTypeFilter);
 
   // Check if current user has permission to perform actions
   const isSuperAdmin = userRole === "super_admin";
@@ -529,7 +603,7 @@ export default function AdminPanel() {
 
   // Filter users based on search query
   const filteredUsers = users.filter(user => 
-    user.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -541,7 +615,8 @@ export default function AdminPanel() {
           <div className="container py-4 md:py-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="flex flex-col md:flex-row md:space-x-4 w-full md:w-auto">
               <div className="flex justify-between items-center w-full md:w-auto">
-                <h1 className="text-2xl md:text-3xl font-bold">Admin Panel {isSuperAdmin && "👑"}</h1>
+                <h1 className="text-2xl md:text-3xl font-bold">Admin Panel {isSuperAdmin && "👑"} </h1>
+                                
                 <Sheet>
                   <SheetTrigger asChild className="md:hidden">
                     <Button variant="outline" size="icon">
@@ -562,20 +637,31 @@ export default function AdminPanel() {
                         </Button>
                       </Link>
                       <Button 
-                        onClick={handleLogout} 
-                        variant="outline" 
+                        onClick={handleLogout}
+                        variant="outline"
                         className="w-full justify-start text-red-600"
                       >
                         <LogOut className="h-4 w-4 mr-2" />
                         Log out
                       </Button>
                     </div>
+                                      
                   </SheetContent>
                 </Sheet>
+              
               </div>
-              <p className="text-muted-foreground mb-2 text-sm md:text-base">Manage users, Reports and settings</p>
-            </div>
+            
+              <p className="text-muted-foreground mt-2 text-sm md:text-base">Manage users, Reports and settings</p>
 
+             <div>
+            <Link to="/dashboard">
+              <Button variant="outline" className="w-full justify-start ">
+                Dashboard
+              </Button>
+            </Link>
+            </div>
+            </div>
+                                    
             {/* User Dropdown */}
             <div className="hidden md:flex justify-end w-full md:w-auto">
               <DropdownMenu>
@@ -617,7 +703,7 @@ export default function AdminPanel() {
                 <Users className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Users</span>
               </TabsTrigger>
-              <TabsTrigger value="prompts">
+              <TabsTrigger value="report-types">
                 <FileText className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Report Types</span>
               </TabsTrigger>
@@ -639,14 +725,14 @@ export default function AdminPanel() {
                     <div className="relative flex-1">
                       <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input 
-                        placeholder="Search users..." 
+                        placeholder="Search users..."
                         className="pl-8"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
                     </div>
                   </div>
-                  
+                                  
                   <div className="space-y-4">
                     {filteredUsers.length === 0 && (
                       <p className="text-muted-foreground text-sm">No users found</p>
@@ -664,7 +750,7 @@ export default function AdminPanel() {
                               <div className="flex items-center gap-2">
                                 <Label>Role:</Label>
                                 <select 
-                                  value={editRole} 
+                                  value={editRole}
                                   onChange={(e) => setEditRole(e.target.value)}
                                   className="rounded border px-2 py-1"
                                   disabled={user.role === "super_admin" && !isSuperAdmin}
@@ -757,7 +843,7 @@ export default function AdminPanel() {
                         <div className="flex items-center gap-2">
                           <Label>Role:</Label>
                           <select 
-                            value={newUserRole} 
+                            value={newUserRole}
                             onChange={(e) => setNewUserRole(e.target.value)}
                             className="rounded border px-2 py-1"
                             disabled={!isSuperAdmin && newUserRole === "super_admin"}
@@ -777,123 +863,109 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
-            {/* Prompts Tab */}
-            <TabsContent value="prompts" className="space-y-4">
+            {/* Report Types Tab */}
+            <TabsContent value="report-types" className="space-y-4">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-2xl md:text-4xl">Report Types</CardTitle>
-                  <CardDescription>Create, assign, and toggle report completion</CardDescription>
+                  <CardDescription>Create, assign, and manage report types with custom prompts</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="mb-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
                     <div className="relative flex-1 w-full">
                       <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input 
-                        placeholder="Search report types..." 
+                        placeholder="Search report types..."
                         className="pl-8 w-full"
                         onChange={(e) => {
                           const q = e.target.value.toLowerCase();
                           if (!q) {
-                            fetchPrompts();
+                            fetchReportTypes();
                           } else {
-                            setPrompts((prev) => prev.filter((p) => (p.title || "").toLowerCase().includes(q)));
+                            setReportTypes((prev) => prev.filter((rt) => (rt.title || "").toLowerCase().includes(q)));
                           }
                         }}
                       />
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                      <Button size="sm" variant={promptFilter === "all" ? "default" : "outline"} onClick={() => setPromptFilter("all")} className="flex-1 sm:flex-initial">All</Button>
-                      <Button size="sm" variant={promptFilter === "not_done" ? "default" : "outline"} onClick={() => setPromptFilter("not_done")} className="flex-1 sm:flex-initial">Not Done</Button>
-                      <Button size="sm" variant={promptFilter === "done" ? "default" : "outline"} onClick={() => setPromptFilter("done")} className="flex-1 sm:flex-initial">Done</Button>
+                      <Button size="sm" variant={reportTypeFilter === "all" ? "default" : "outline"} onClick={() => setReportTypeFilter("all")} className="flex-1 sm:flex-initial">All</Button>
+                      <Button size="sm" variant={reportTypeFilter === "active" ? "default" : "outline"} onClick={() => setReportTypeFilter("active")} className="flex-1 sm:flex-initial">Active</Button>
+                      <Button size="sm" variant={reportTypeFilter === "inactive" ? "default" : "outline"} onClick={() => setReportTypeFilter("inactive")} className="flex-1 sm:flex-initial">Inactive</Button>
                     </div>
                   </div>
 
-                  {/* Create Prompt */}
+                  {/* Create Report Type */}
                   {isAdmin && (
                     <div className="p-4 bg-muted/50 rounded-lg mb-6">
-                      <h4 className="font-semibold mb-3">Create Report Type</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <h4 className="font-semibold mb-3">Create New Report Type</h4>
+                      <div className="grid grid-cols-1 gap-3">
                         <Input 
-                          placeholder="Report Type Name*" 
-                          value={newPromptTitle} 
-                          onChange={(e) => setNewPromptTitle(e.target.value)} 
+                          placeholder="Report Type Name*"
+                          value={newReportTypeTitle}
+                          onChange={(e) => setNewReportTypeTitle(e.target.value)}
                           required
                         />
+                        <Textarea 
+                          placeholder="Description"
+                          value={newReportTypeDescription}
+                          onChange={(e) => setNewReportTypeDescription(e.target.value)}
+                         />
+                        <div className="space-y-2">
+                          <Label>Master Prompt*</Label>
+                          <Textarea 
+                            placeholder="Enter the prompt for this report type..."
+                            value={newReportTypePrompt}
+                            onChange={(e) => setNewReportTypePrompt(e.target.value)}
+                            className="min-h-[150px] font-mono text-sm"
+                            required
+                          />
+                        </div>
                         <div>
-                          <div className="md:-mt-7">
-                          <Label>Assign To*</Label>
+                          <Label>Assign To</Label>
                           <UserMultiSelect
                             users={users}
                             selectedUserIds={assignUserIds}
                             onSelectionChange={setAssignUserIds}
                             placeholder="Select users to assign..."
                           />
-                          </div>
                         </div>
-                        <Textarea 
-                          className="md:col-span-2" 
-                          placeholder="Description*" 
-                          value={newPromptDescription} 
-                          onChange={(e) => setNewPromptDescription(e.target.value)} 
-                          required
-                        />
                       </div>
                       <div className="mt-3">
-                        <Button variant="gradient" onClick={handleCreatePrompt}><Plus className="h-4 w-4 mr-2" /> Create Prompt</Button>
+                        <Button variant="gradient" onClick={handleCreateReportType}><Plus className="h-4 w-4 mr-2" /> Create Report Type</Button>
                       </div>
                     </div>
                   )}
 
-                  {/* Master Research Prompt */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Master Research Prompt</CardTitle>
-                      <CardDescription>Edit the system prompt used for all research report generation</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="prompt">System Prompt</Label>
-                        <Textarea
-                          id="prompt"
-                          value={masterPrompt}
-                          onChange={(e) => setMasterPrompt(e.target.value)}
-                          className="min-h-[200px] md:min-h-[300px] font-mono text-sm"
-                          disabled={!isEditingPrompt || !isAdmin}
-                        />
-                      </div>
-                      {isAdmin && (
-                        <div className="flex flex-wrap gap-3">
-                          {isEditingPrompt ? (
-                            <>
-                              <Button onClick={handleSaveMasterPrompt} variant="gradient">
-                                <Save className="h-4 w-4 mr-2" /> Save Changes
-                              </Button>
-                              <Button variant="outline" onClick={() => { setIsEditingPrompt(false); setMasterPrompt(defaultPrompt); }}>
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <Button onClick={() => setIsEditingPrompt(true)} variant="outline">
-                              <Edit className="h-4 w-4 mr-2" /> Edit Prompt
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Prompt list */}
+                  {/* Report Types list */}
                   <div className="space-y-3 mt-6">
-                    {filteredPrompts.length === 0 && <p className="text-sm text-muted-foreground">No prompts found</p>}
-                    {filteredPrompts.map((p) => {
-                      const assignedUsers = users.filter((u) => p.assigned_to?.includes(u.id));
+                    {filteredReportTypes.length === 0 && <p className="text-sm text-muted-foreground">No report types found</p>}
+                    {filteredReportTypes.map((rt) => {
+                      const assignedUsers = users.filter((u) => rt.assigned_to?.includes(u.id));
                       return (
-                        <div key={p.id} className="p-4 bg-muted/50 rounded-lg flex flex-col md:flex-row justify-between items-start gap-4">
+                        <div key={rt.id} className="p-4 bg-muted/50 rounded-lg flex flex-col md:flex-row justify-between items-start gap-4">
                           <div className="flex-1">
-                            {editingPromptId === p.id ? (
-                              <div className="space-y-2">
-                                <Input value={editPromptTitle} onChange={(e) => setEditPromptTitle(e.target.value)} />
-                                <Textarea value={editPromptDescription ?? ""} onChange={(e) => setEditPromptDescription(e.target.value)} />
+                            {editingReportTypeId === rt.id ? (
+                              <div className="space-y-3">
+                                <Input 
+                                  placeholder="Report Type Name*"
+                                  value={editReportTypeTitle}
+                                  onChange={(e) => setEditReportTypeTitle(e.target.value)}
+                                  required
+                                />
+                                <Textarea 
+                                  placeholder="Description"
+                                  value={editReportTypeDescription ?? ""}
+                                  onChange={(e) => setEditReportTypeDescription(e.target.value)}
+                                 />
+                                <div className="space-y-2">
+                                  <Label>Master Prompt*</Label>
+                                  <Textarea 
+                                    value={editReportTypePrompt}
+                                    onChange={(e) => setEditReportTypePrompt(e.target.value)}
+                                    className="min-h-[150px] font-mono text-sm"
+                                    required
+                                  />
+                                </div>
                                 <div>
                                   <Label>Assign to</Label>
                                   <UserMultiSelect
@@ -907,56 +979,67 @@ export default function AdminPanel() {
                             ) : (
                               <>
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-1">
-                                  <h4 className="font-semibold">{p.title}</h4>
-                                  <Badge variant={p.status === "done" ? "default" : "secondary"}>
-                                    {p.status === "done" ? "Done" : "Not done"}
-                                  </Badge>
+                                  <h4 className="font-semibold">{rt.title}</h4>
+                                  <Badge variant={rt.status === "active" ? "default" : "secondary"}>
+                                    {rt.status === "active" ? "Active" : "Inactive"}
+                                   </Badge>
                                 </div>
-                                <p className="text-sm text-muted-foreground mb-2">{p.description}</p>
+                                <p className="text-sm text-muted-foreground mb-2">{rt.description}</p>
+                                <div className="mb-3">
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                                    <FileCode className="h-4 w-4" />
+                                    <span> Master Prompt:</span>
+                                  </div>
+                                  <div className="text-xs bg-muted p-2 rounded-md overflow-hidden">
+                                    {rt.prompt.length > 150
+                                       ? `${rt.prompt.substring(0, 150)}...`
+                                       : rt.prompt}
+                                  </div>
+                                </div>
                                 <div className="text-xs text-muted-foreground">
-                                  Assigned to: {assignedUsers.length > 0 
-                                    ? assignedUsers.map(u => u.name).join(", ") 
-                                    : "Unassigned"}
+                                  Assigned to: {assignedUsers.length > 0
+                                     ? assignedUsers.map(u => u.name).join(", ")
+                                     : "All users"}
                                 </div>
                               </>
                             )}
                           </div>
                           <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-                            {editingPromptId === p.id ? (
+                            {editingReportTypeId === rt.id ? (
                               <>
                                 <div className="flex gap-2 w-full md:w-auto">
-                                  <Button size="sm" onClick={() => saveEditedPrompt(p.id)} className="flex-1 md:flex-initial"><Check className="h-4 w-4" /></Button>
-                                  <Button size="sm" variant="outline" onClick={cancelEditPrompt} className="flex-1 md:flex-initial"><X className="h-4 w-4" /></Button>
+                                  <Button size="sm" onClick={() => saveEditedReportType(rt.id)} className="flex-1 md:flex-initial"><Check className="h-4 w-4" /></Button>
+                                  <Button size="sm" variant="outline" onClick={cancelEditReportType} className="flex-1 md:flex-initial"><X className="h-4 w-4" /></Button>
                                 </div>
                               </>
                             ) : (
                               <>
-                                <div className="flex flex-col gap-2 w-full md:w-auto">
+                                 <div className="flex flex-col gap-2 w-full md:w-auto">
                                   {isAdmin && (
-                                    <Button size="sm" onClick={() => togglePromptStatus(p)} className="w-full md:w-auto">
-                                      {p.status === "done" ? "Mark Not Done" : "Mark Done"}
-                                    </Button>
+                                    <Button size="sm" onClick={() => toggleReportTypeStatus(rt)} className="w-full md:w-auto">
+                                      {rt.status === "active" ? "Mark Inactive" : "Mark Active"}
+                                     </Button>
                                   )}
-
+                                  
                                   <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                                     {isAdmin && (
                                       <div className="w-full md:w-72">
-                                      <UserMultiSelect
-                                        users={users}
-                                        selectedUserIds={p.assigned_to || []}
-                                        onSelectionChange={(selectedIds) => handleAssignPromptToUsers(p.id, selectedIds)}
-                                        placeholder="Assign users..."
-                                      />
+                                        <UserMultiSelect
+                                          users={users}
+                                          selectedUserIds={rt.assigned_to || []}
+                                          onSelectionChange={(selectedIds) => handleAssignReportTypeToUsers(rt.id, selectedIds)}
+                                          placeholder="Assign users..."
+                                        />
                                       </div>
                                     )}
                                     <div className="flex gap-2">
                                       {isAdmin && (
-                                        <Button size="sm" variant="outline" onClick={() => startEditPrompt(p)} className="flex-1 md:flex-initial">
+                                        <Button size="sm" variant="outline" onClick={() => startEditReportType(rt)} className="flex-1 md:flex-initial">
                                           <Edit className="h-4 w-4" />
                                         </Button>
                                       )}
                                       {isAdmin && (
-                                        <Button size="sm" variant="destructive" onClick={() => handleDeletePrompt(p.id)} className="flex-1 md:flex-initial">
+                                        <Button size="sm" variant="destructive" onClick={() => handleDeleteReportType(rt.id)} className="flex-1 md:flex-initial">
                                           <Trash2 className="h-4 w-4" />
                                         </Button>
                                       )}

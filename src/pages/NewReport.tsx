@@ -35,12 +35,13 @@ interface OpenAIResearchJob {
   };
 }
 
-interface Prompt {
+interface ReportType {
   id: string;
   title: string;
   description?: string | null;
-  assigned_to?: string | null;
-  status: "done" | "not_done";
+  prompt: string;
+  assigned_to?: string[] | null;
+  status: "active" | "inactive";
   created_at?: string;
 }
 
@@ -48,8 +49,9 @@ export default function NewReport() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [availableReportTypes, setAvailableReportTypes] = useState<Prompt[]>([]);
+  const [availableReportTypes, setAvailableReportTypes] = useState<ReportType[]>([]);
   const [isLoadingReportTypes, setIsLoadingReportTypes] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<FormData>({
     reportName: "",
@@ -60,35 +62,56 @@ export default function NewReport() {
     files: [],
   });
 
-  // Fetch available report types from database
+  // Get current user ID
   useEffect(() => {
-    const fetchPrompts = async () => {
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserId(user.id);
+      }
+    };
+    getCurrentUser();
+  }, []);
+
+  // Fetch available report types from database that are assigned to the current user
+  useEffect(() => {
+    const fetchReportTypes = async () => {
+      if (!currentUserId) return;
+      
       try {
         setIsLoadingReportTypes(true);
         const { data, error } = await supabase
-          .from("prompts")
+          .from("report_types")
           .select("*")
           .order("title", { ascending: true });
 
         if (error) {
-          console.error("Error fetching prompts:", error);
+          console.error("Error fetching report types:", error);
           toast({
             title: "Error",
             description: "Failed to load report types",
             variant: "destructive",
           });
         } else {
-          setAvailableReportTypes(data || []);
+          // Filter report types: show only active ones that are either assigned to this user or not assigned to anyone
+          const filteredReportTypes = (data || []).filter(reportType => 
+            reportType.status === "active" && 
+            (!reportType.assigned_to || 
+             reportType.assigned_to.length === 0 || 
+             reportType.assigned_to.includes(currentUserId))
+          );
+          
+          setAvailableReportTypes(filteredReportTypes);
         }
       } catch (err) {
-        console.error("Error fetching prompts:", err);
+        console.error("Error fetching report types:", err);
       } finally {
         setIsLoadingReportTypes(false);
       }
     };
 
-    fetchPrompts();
-  }, [toast]);
+    fetchReportTypes();
+  }, [currentUserId, toast]);
 
   // Google Docs creation function
   async function getGoogleAccessToken() {
@@ -289,11 +312,16 @@ export default function NewReport() {
 
   // Get system message based on report type
   const getSystemMessage = (type: string) => {
-    // Try to find the prompt description for this report type
-    const prompt = availableReportTypes.find(p => p.title === type);
-    const description = prompt?.description || "";
+    // Try to find the report type with its prompt
+    const reportType = availableReportTypes.find(rt => rt.title === type);
     
-    const baseMessage = `You are a professional business research analyst preparing a comprehensive ${type} report. Your task is to analyze the provided materials and conduct thorough web research to create a detailed, data-driven business report.
+    if (reportType && reportType.prompt) {
+      // Use the custom prompt from the report type
+      return reportType.prompt;
+    }
+    
+    // Fallback to default message if no custom prompt
+    return `You are a professional business research analyst preparing a comprehensive ${type} report. Your task is to analyze the provided materials and conduct thorough web research to create a detailed, data-driven business report.
 
 Key Requirements:
 - Focus on actionable insights with specific data, statistics, and trends
@@ -301,16 +329,6 @@ Key Requirements:
 - Provide structured analysis with clear sections and headers
 - Support recommendations with evidence from reliable sources
 - Format the output as a professional business report`;
-
-    // If there's a custom description for this prompt, append it
-    if (description) {
-      return `${baseMessage}
-
-Specific focus areas for this report:
-${description}`;
-    }
-
-    return baseMessage;
   };
 
   // Submit research job to OpenAI Deep Research API
@@ -584,49 +602,36 @@ ${formData.files.map(file => `- ${file.name}`).join('\n')}
               </div>
               <div className="space-y-2 mt-4">
                 <Label htmlFor="typeOfReport">Type of report *</Label>
-              <Select
-  value={formData.typeOfReport}
-  onValueChange={(value) => setFormData({ ...formData, typeOfReport: value })}
-  required
-  disabled={isSubmitting || isLoadingReportTypes}
->
-  <SelectTrigger className="w-full">
-    <SelectValue
-      placeholder={
-        isLoadingReportTypes
-          ? "Loading report types..."
-          : availableReportTypes.length === 0
-          ? "No report types available"
-          : "Select a report type"
-      }
-    />
-  </SelectTrigger>
-  <SelectContent>
-    {/* ✅ Static options */}
-    {/* <SelectItem value="American CPG Growth Plan">
-      American CPG Growth Plan
-    </SelectItem> */}
-    {/* <SelectItem value="American Service Growth Plan">
-      American Service Growth Plan
-    </SelectItem> */}
-    {/* <SelectItem value="Relatório de Viabilidade de Expansão aos EUA">
-      Relatório de Viabilidade de Expansão aos EUA
-    </SelectItem> */}
-
-    {/* ✅ Dynamic options (only completed prompts) */}
-    {availableReportTypes
-      .filter((prompt) => prompt.status === "done")
-      .map((prompt) => (
-        <SelectItem key={prompt.id} value={prompt.title}>
-          {prompt.title}
-        </SelectItem>
-      ))}
-  </SelectContent>
-</Select>
+                <Select
+                  value={formData.typeOfReport}
+                  onValueChange={(value) => setFormData({ ...formData, typeOfReport: value })}
+                  required
+                  disabled={isSubmitting || isLoadingReportTypes}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue
+                      placeholder={
+                        isLoadingReportTypes
+                          ? "Loading report types..."
+                          : availableReportTypes.length === 0
+                          ? "No report types available"
+                          : "Select a report type"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* ✅ Dynamic options (only active report types assigned to this user) */}
+                    {availableReportTypes.map((reportType) => (
+                      <SelectItem key={reportType.id} value={reportType.title}>
+                        {reportType.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
                 {availableReportTypes.length === 0 && !isLoadingReportTypes && (
                   <p className="text-sm text-muted-foreground">
-                    No report types available. Please contact an administrator.
+                    No report types available. Please contact an administrator to assign report types to you.
                   </p>
                 )}
               </div>
