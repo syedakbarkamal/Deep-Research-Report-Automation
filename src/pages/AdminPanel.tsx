@@ -698,7 +698,7 @@ export default function AdminPanel() {
           </div>
 
           <Tabs defaultValue="users" className="space-y-6">
-            <TabsList className="grid w-full max-w-4xl grid-cols-3">
+            <TabsList className="grid w-full max-w-4xl grid-cols-2">
               <TabsTrigger value="users">
                 <Users className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Users</span>
@@ -707,10 +707,10 @@ export default function AdminPanel() {
                 <FileText className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Report Types</span>
               </TabsTrigger>
-              <TabsTrigger value="settings">
+              {/* <TabsTrigger value="settings">
                 <Settings className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Settings</span>
-              </TabsTrigger>
+              </TabsTrigger> */}
             </TabsList>
 
             {/* Users Tab */}
@@ -1058,7 +1058,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Settings Tab */}
-            <TabsContent value="settings" className="space-y-4">
+            {/* <TabsContent value="settings" className="space-y-4">
               <Card>
                 <CardHeader>
                   <CardTitle>API Configuration</CardTitle>
@@ -1078,7 +1078,7 @@ export default function AdminPanel() {
                   </div>
                 </CardContent>
               </Card>
-            </TabsContent>
+            </TabsContent> */}
           </Tabs>
         </div>
       </div>
