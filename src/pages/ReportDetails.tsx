@@ -48,57 +48,49 @@ export default function ReportDetails() {
   }, [id]);
 
   // Create Google Doc
-  const handleCreateDoc = async () => {
-    if (!googleInitialized || !report) return;
-    setCreatingDoc(true);
+const handleCreateDoc = async () => {
+  if (!googleInitialized || !report) return;
+  setCreatingDoc(true);
 
-    try {
-      await signIn();
+  try {
+    await signIn();
 
-      // --- FORMAT CONTENT LIKE renderFormattedField ---
-      const lines = (report.generated_report || "").split("\n");
-      const formattedContent = lines
-        .map((line) => {
-          if (line.startsWith("## ")) {
-            return `\n**${line.replace("## ", "")}**\n`; // Bold for h2
-          }
-          if (line.startsWith("### ")) {
-            return `\n*${line.replace("### ", "")}*\n`; // Italic for h3
-          }
-          return line; // Normal text
-        })
-        .join("\n");
+    // Pass the raw generated_report content directly
+    
+   const docContent = `
+# Report Name: ${report.type_of_report || "Report"}
 
-      // --- FINAL DOC CONTENT ---
-      const docContent = `
-Report Type: ${report.type_of_report || "Untitled Report"}
+# Executive Summary
 
-Generated Report:
-${formattedContent}
-      `;
+${report.generated_report || ""}
+`;
 
-      const url = await createGoogleDoc(
-        report.type_of_report || "Report",
-        docContent
-      );
 
-      // Save URL in Supabase
-      const { error } = await supabase
-        .from("reports")
-        .update({ google_docs_url: url })
-        .eq("id", id);
+    const url = await createGoogleDoc(
+      report.type_of_report || "Report",
+      docContent,
+      "https://ltypkjkjzdhfwjpjooeg.supabase.co/storage/v1/object/public/logos/soundcheckinsight.png"
+    );
 
-      if (error) {
-        console.error("Error updating Supabase:", error.message);
-      } else {
-        setReport({ ...report, google_docs_url: url });
-      }
-    } catch (err) {
-      console.error("Error creating Google Doc:", err);
-    } finally {
-      setCreatingDoc(false);
+    console.log("Google Doc Link:", url);
+
+    // Save URL in Supabase
+    const { error } = await supabase
+      .from("reports")
+      .update({ google_docs_url: url })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error updating Supabase:", error.message);
+    } else {
+      setReport({ ...report, google_docs_url: url });
     }
-  };
+  } catch (err) {
+    console.error("Error creating Google Doc:", err);
+  } finally {
+    setCreatingDoc(false);
+  }
+};
 
   if (loading) return <p className="p-6">Loading...</p>;
   if (!report) return <p className="p-6">Report not found</p>;
