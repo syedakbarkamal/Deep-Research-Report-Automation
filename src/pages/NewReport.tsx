@@ -426,7 +426,7 @@ Key Requirements:
         meeting_transcript: formData.meetingTranscript.trim(),
         client_urls: cleanUrls,
         file_urls: fileUrls,
-        user_id: user.id,
+        user_id: user?.id,
         status: 'researching' // Updated status
       };
 

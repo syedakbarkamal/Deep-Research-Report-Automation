@@ -31,7 +31,7 @@ export function Hero() {
                 <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
               </Button>
             </Link>
-            <Link to="/demo">
+            <Link to="#">
               <Button size="xl" variant="outline">
                 Watch Demo
               </Button>

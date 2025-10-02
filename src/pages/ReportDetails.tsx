@@ -69,7 +69,7 @@ ${report.generated_report || ""}
     const url = await createGoogleDoc(
       report.type_of_report || "Report",
       docContent,
-      "https://ltypkjkjzdhfwjpjooeg.supabase.co/storage/v1/object/public/logos/soundcheckinsight.png"
+      "https://rzyftbvjjhaiymmovops.supabase.co/storage/v1/object/public/logo/soundcheckinsight.png"
     );
 
     console.log("Google Doc Link:", url);

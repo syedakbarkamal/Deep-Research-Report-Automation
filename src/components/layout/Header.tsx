@@ -55,10 +55,10 @@ export function Header({ isAuthenticated = false, userRole, onLogout }: HeaderPr
             </>
           ) : (
             <>
-              <Link to="/features" className="text-sm font-medium transition-colors hover:text-primary">
+              <Link to="#" className="text-sm font-medium transition-colors hover:text-primary">
                 Features
               </Link>
-              <Link to="/pricing" className="text-sm font-medium transition-colors hover:text-primary">
+              <Link to="#" className="text-sm font-medium transition-colors hover:text-primary">
                 Pricing
               </Link>
               <Link to="/login">
