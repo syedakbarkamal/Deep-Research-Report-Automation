@@ -197,7 +197,7 @@ export default function AdminPanel() {
 
   const navigate = useNavigate();
 
-  useEffect(() => {
+ useEffect(() => {
     const fetchUser = async () => {
       const localRole = localStorage.getItem("role");
       const localEmail = localStorage.getItem("email");
@@ -213,13 +213,23 @@ export default function AdminPanel() {
           // Check user role from database
           const { data: userData } = await supabase
             .from("users")
-            .select("role")
+            .select("role, name")
             .eq("id", data.user.id)
             .single();
 
-          setUserRole(userData?.role || "user");
-          setUserEmail(data.user.email);
-          setUserName(data.user.user_metadata?.full_name || "User");
+          const role = userData?.role || "user";
+          const name = userData?.name || data.user.user_metadata?.full_name || "User";
+          const email = data.user.email || "";
+
+          // Store in localStorage for consistency across routes
+          localStorage.setItem("role", role);
+          localStorage.setItem("email", email);
+          localStorage.setItem("name", name);
+          localStorage.setItem("userId", data.user.id);
+
+          setUserRole(role);
+          setUserEmail(email);
+          setUserName(name);
         }
       }
     };

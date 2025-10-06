@@ -19,6 +19,8 @@ import {
   User,
   LogOut,
   Settings,
+  Shield,
+  Crown,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -54,6 +56,7 @@ export default function Dashboard() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("user");
+  const [userId, setUserId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -64,14 +67,21 @@ export default function Dashboard() {
         const localRole = localStorage.getItem("role");
         const localEmail = localStorage.getItem("email");
         const localName = localStorage.getItem("name");
+        const localUserId = localStorage.getItem("userId");
 
-        let userId: string | null = null;
+        let currentUserId: string | null = null;
+        let currentUserRole = "user";
 
-        if (localRole === "admin") {
-          setUserRole("admin");
+        // Check if user has stored credentials (admin or super_admin)
+        if (localRole && (localRole === "admin" || localRole === "super_admin")) {
+          currentUserRole = localRole;
+          setUserRole(localRole);
           setUserEmail(localEmail || "admin@example.com");
-          setUserName(localName || "Admin");
+          setUserName(localName || (localRole === "super_admin" ? "Super Admin" : "Admin"));
+          currentUserId = localUserId;
+          setUserId(localUserId);
         } else {
+          // Regular user - check Supabase auth
           const { data, error } = await supabase.auth.getUser();
           if (error || !data.user) {
             toast({
@@ -82,16 +92,34 @@ export default function Dashboard() {
             navigate("/login");
             return;
           }
-          userId = data.user.id;
+          currentUserId = data.user.id;
+          setUserId(currentUserId);
           setUserEmail(data.user.email);
           setUserName(data.user.user_metadata?.full_name || "User");
+
+          // Fetch user role from database
+          const { data: userData } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", currentUserId)
+            .single();
+
+          currentUserRole = userData?.role || "user";
+          setUserRole(currentUserRole);
+
+          // Store in localStorage for consistency
+          if (userData?.role) {
+            localStorage.setItem("role", userData.role);
+            localStorage.setItem("userId", currentUserId);
+          }
         }
 
-        // Fetch reports (only current user unless admin)
+        // Fetch reports based on role
         let query = supabase.from("reports").select("*").order("created_at", { ascending: false });
 
-        if (userRole !== "admin" && userId) {
-          query = query.eq("user_id", userId);
+        // Only filter by user_id if not admin or super_admin
+        if (currentUserRole !== "admin" && currentUserRole !== "super_admin" && currentUserId) {
+          query = query.eq("user_id", currentUserId);
         }
 
         const { data: reportsData, error: reportsError } = await query;
@@ -112,12 +140,13 @@ export default function Dashboard() {
     };
 
     fetchUserAndReports();
-  }, [navigate, toast, userRole]);
+  }, [navigate, toast]);
 
   const handleLogout = async () => {
     localStorage.removeItem("role");
     localStorage.removeItem("email");
     localStorage.removeItem("name");
+    localStorage.removeItem("userId");
     await supabase.auth.signOut();
     navigate("/login");
   };
@@ -125,6 +154,10 @@ export default function Dashboard() {
   const filteredReports = reports.filter((report) =>
     report.report_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Check if user is admin or super admin
+  const isAdmin = userRole === "admin" || userRole === "super_admin";
+  const isSuperAdmin = userRole === "super_admin";
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
@@ -137,9 +170,11 @@ export default function Dashboard() {
             </Button>
           </Link>
 
-          {userRole === "admin" && (
+          {isAdmin && (
             <Link to="/admin">
               <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
+                {isSuperAdmin && <Crown className="h-4 w-4 mr-2" />}
+                {!isSuperAdmin && <Shield className="h-4 w-4 mr-2" />}
                 Admin Panel
               </Button>
             </Link>
@@ -156,9 +191,14 @@ export default function Dashboard() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>
               <div className="flex flex-col">
-                <span className="font-medium">{userName || "Guest"}</span>
+                <span className="font-medium">
+                  {userName || "Guest"} {isSuperAdmin && "👑"}
+                </span>
                 <span className="text-xs text-muted-foreground">
                   {userEmail || "Not signed in"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Role: {userRole}
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -179,9 +219,14 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Your Research Reports</h1>
+            <h1 className="text-3xl font-bold mb-2">
+              {isAdmin ? "All Research Reports" : "Your Research Reports"}
+            </h1>
             <p className="text-muted-foreground">
-              Track and manage all your AI-generated research reports
+              {isAdmin 
+                ? "Track and manage all research reports across the platform"
+                : "Track and manage all your AI-generated research reports"
+              }
             </p>
           </div>
           <Link to="/new-report">
@@ -287,7 +332,7 @@ export default function Dashboard() {
                   <Link to="/new-report">
                     <Button variant="gradient">
                       <Plus className="h-4 w-4 mr-2" />
-                      Create First Reports
+                      Create First Report
                     </Button>
                   </Link>
                 )}
@@ -298,4 +343,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}  
+}
