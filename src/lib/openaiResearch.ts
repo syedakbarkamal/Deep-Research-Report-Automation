@@ -42,8 +42,8 @@ export class OpenAIResearchService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: "o4-mini",
-        reasoning: { effort: "high" },
+        model: "o3-deep-research-2025-06-26",
+        reasoning: { effort: "medium" },
         input: [
           {
             role: "system",

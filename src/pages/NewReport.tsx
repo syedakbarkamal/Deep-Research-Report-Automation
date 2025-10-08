@@ -537,6 +537,13 @@ ${formData.files.map(file => `- ${file.name}`).join('\n')}
   return (
     <div className="min-h-screen bg-gradient-subtle py-8">
       <div className="container max-w-4xl">
+        <div className="flex justify-center md:justify-start mb-6 md:mb-8">
+      <img 
+        src="/soundcheckinsight.png" 
+        alt="Logo" 
+        className="w-[80px] h-[80px] sm:w-[100px] sm:h-[100px] md:w-[120px] md:h-[120px] lg:w-[150px] lg:h-[150px] object-contain"
+      />
+    </div>
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-4">
             <Brain className="h-8 w-8 text-primary" />

@@ -25,17 +25,25 @@ export function Hero() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
-            <Link to="/register">
-              <Button size="xl" variant="gradient" className="group">
-                Start Free Trial
-                <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-              </Button>
-            </Link>
-            <Link to="#">
+            {/* <Link to="/register"> */}
+            <Button
+  size="xl"
+  variant="gradient"
+  className="group"
+  asChild
+>
+  <a href="https://www.soundcheckinsights.com" target="_blank" rel="noopener noreferrer">
+    Learn More
+    <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+  </a>
+</Button>
+
+            {/* </Link> */}
+            {/* <Link to="#">
               <Button size="xl" variant="outline">
                 Watch Demo
               </Button>
-            </Link>
+            </Link> */}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-2xl mx-auto">

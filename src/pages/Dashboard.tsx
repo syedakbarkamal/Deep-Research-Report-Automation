@@ -162,57 +162,73 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gradient-subtle">
       {/* Top Navigation */}
-      <div className="container py-8 flex justify-between items-center">
-        <div className="flex space-x-4">
-          <Link to="/dashboard">
-            <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
-              Dashboard
-            </Button>
-          </Link>
+      {/* Top Navigation */}
+      <div className="container py-4 md:py-8">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+          {/* Logo */}
+          <div className="flex justify-center md:justify-start">
+            <img 
+              src="/soundcheckinsight.png" 
+              alt="Logo" 
+              className="w-[80px] h-[80px] sm:w-[100px] sm:h-[100px] md:w-[120px] md:h-[120px] lg:w-[150px] lg:h-[150px] object-contain"
+            />
+          </div>
 
-          {isAdmin && (
-            <Link to="/admin">
-              <Button variant="gradient" className="mt-4 md:mt-0 flex items-center">
-                {isSuperAdmin && <Crown className="h-4 w-4 mr-2" />}
-                {!isSuperAdmin && <Shield className="h-4 w-4 mr-2" />}
-                Admin Panel
-              </Button>
-            </Link>
-          )}
+          {/* Navigation Buttons and User Menu */}
+          <div className="flex flex-row justify-between md:justify-end items-center gap-2 md:gap-4">
+            <div className="flex flex-wrap gap-2">
+              <Link to="/dashboard">
+                <Button variant="gradient" size="sm" className="md:size-default flex items-center text-xs md:text-sm">
+                  Dashboard
+                </Button>
+              </Link>
+
+              {isAdmin && (
+                <Link to="/admin">
+                  <Button variant="gradient" size="sm" className="md:size-default flex items-center text-xs md:text-sm">
+                    {isSuperAdmin && <Crown className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />}
+                    {!isSuperAdmin && <Shield className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />}
+                    <span className="hidden sm:inline">Admin Panel</span>
+                    <span className="sm:hidden">Admin</span>
+                  </Button>
+                </Link>
+              )}
+            </div>
+
+            {/* User Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="shrink-0">
+                  <User className="h-4 w-4 md:h-5 md:w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span className="font-medium">
+                      {userName || "Guest"} {isSuperAdmin && "👑"}
+                    </span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      {userEmail || "Not signed in"}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Role: {userRole}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Profile Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-
-        {/* User Dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon">
-              <User className="h-5 w-5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>
-              <div className="flex flex-col">
-                <span className="font-medium">
-                  {userName || "Guest"} {isSuperAdmin && "👑"}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {userEmail || "Not signed in"}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  Role: {userRole}
-                </span>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
-              <Settings className="mr-2 h-4 w-4" />
-              Profile Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-              <LogOut className="mr-2 h-4 w-4" />
-              Log out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
       <div className="container">
