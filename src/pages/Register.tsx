@@ -77,11 +77,16 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-subtle p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="h-12 w-12 rounded-lg bg-gradient-primary p-2 text-primary-foreground">
-              <FileSearch className="h-8 w-8" />
-            </div>
-          </div>
+     <div className="h-30 w-30 rounded-lg p-2 text-primary-foreground">
+  <div className="h-34 w-34 p-2 flex items-center justify-center">
+    <img 
+      src="/soundcheckinsight.png" 
+      alt="Logo" 
+      className="w-[180px] h-[180px] object-contain"
+    />
+  </div>
+</div>
+
           <CardTitle className="text-2xl">Create Account</CardTitle>
           <CardDescription>
             Start automating your research reports today

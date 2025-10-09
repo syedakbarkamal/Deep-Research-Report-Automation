@@ -20,7 +20,7 @@ export function Header({ isAuthenticated = false, userRole, onLogout }: HeaderPr
   <img
     src="/soundcheckinsight.png"
     alt="Logo"
-    className="h-10 w-60 text-primary"
+    className="h-10 w-50 text-primary"
   />
   
   {/* Existing icon */}
@@ -62,13 +62,13 @@ export function Header({ isAuthenticated = false, userRole, onLogout }: HeaderPr
                 Pricing
               </Link> */}
               <Link to="/login">
-                {/* <Button variant="ghost" size="sm">
+                <Button variant="gradient" size="sm">
                   Sign In
-                </Button> */}
+                </Button>
               </Link>
               <Link to="/register">
                 <Button variant="gradient" size="sm">
-                  Sign In
+                  Sign Up
                 </Button>
               </Link>
             </>

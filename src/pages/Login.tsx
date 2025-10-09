@@ -139,7 +139,7 @@ export default function Login() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mt-6 space-y-3">
+            {/* <div className="mt-6 space-y-3">
   <div className="text-center text-sm text-muted-foreground mb-2">
     Quick login Access:
   </div>
@@ -169,7 +169,7 @@ export default function Login() {
       User
     </Button>
   </div>
-</div>
+</div> */}
 
             <form onSubmit={handleSubmit} className="space-y-3 mt-5">
               <div className="space-y-2">

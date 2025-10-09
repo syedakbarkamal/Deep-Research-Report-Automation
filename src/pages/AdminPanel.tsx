@@ -618,63 +618,117 @@ export default function AdminPanel() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-subtle py-4 md:py-8">
-      <div className="container px-4">
-        <div className="mb-6 md:mb-8">
-          {/* Top Navigation */}
-          <div className="container py-4 md:py-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div className="flex flex-col md:flex-row md:space-x-4 w-full md:w-auto">
-              <div className="flex justify-between items-center w-full md:w-auto">
-                <h1 className="text-2xl md:text-3xl font-bold">Admin Panel {isSuperAdmin && "👑"} </h1>
-                                
-                <Sheet>
-                  <SheetTrigger asChild className="md:hidden">
-                    <Button variant="outline" size="icon">
-                      <Menu className="h-5 w-5" />
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent side="left" className="w-64">
-                    <div className="flex flex-col gap-4 mt-8">
-                      <Link to="/dashboard">
-                        <Button variant="outline" className="w-full justify-start">
-                          Dashboard
-                        </Button>
-                      </Link>
-                      <Link to="/profile-settings">
-                        <Button variant="outline" className="w-full justify-start">
-                          <Settings className="h-4 w-4 mr-2" />
-                          Profile Settings
-                        </Button>
-                      </Link>
-                      <Button 
-                        onClick={handleLogout}
-                        variant="outline"
-                        className="w-full justify-start text-red-600"
-                      >
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Log out
-                      </Button>
-                    </div>
-                                      
-                  </SheetContent>
-                </Sheet>
-              
-              </div>
-            
-              <p className="text-muted-foreground mt-2 text-sm md:text-base">Manage users, Reports and settings</p>
+   <div className="min-h-screen bg-gradient-subtle py-1 md:py-2"> 
+  <div className="container px-4">
+    
+    {/* 🔹 Logo (very close to top) */}
+   {/* 🔹 Top Bar */}
+{/* 🔹 Responsive Top Bar */}
+<div className="flex items-center justify-between px-4 py-2 md:py-3 w-full">
+  {/* Left: Logo */}
+  <div className="flex-shrink-0">
+    <img 
+      src="/soundcheckinsight.png" 
+      alt="Logo" 
+      className="w-[120px] md:w-[170px] h-auto object-contain"
+    />
+  </div>
 
-             <div>
+  {/* Right: User Dropdown */}
+  <div className="flex-shrink-0">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon">
+          <User className="h-5 w-5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>
+          <div className="flex flex-col">
+            <span className="font-medium">{userName || "Guest"}</span>
+            <span className="text-xs text-muted-foreground">
+              {userEmail || "Not signed in"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Role: {userRole || "Unknown"}
+              {userRole === "super_admin" && " 👑"}
+            </span>
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
+          <Settings className="mr-2 h-4 w-4" />
+          Profile Settings
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+          <LogOut className="mr-2 h-4 w-4" />
+          Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </div>
+</div>
+
+
+
+    <div className="mb-3 md:mb-5">
+      {/* 🔹 Top Navigation (pulled upward) */}
+      <div className="container py-1 md:py-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <div className="flex flex-col md:flex-row md:space-x-4 w-full md:w-auto">
+          <div className="flex justify-between items-center w-full md:w-auto">
+            <h1 className="text-2xl md:text-3xl font-bold">
+              Admin Panel {isSuperAdmin && "👑"} 
+            </h1>
+
+            <Sheet>
+              <SheetTrigger asChild className="md:hidden">
+                <Button variant="outline" size="icon">
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64">
+                <div className="flex flex-col gap-4 mt-8">
+                  <Link to="/dashboard">
+                    <Button variant="outline" className="w-full justify-start">
+                      Dashboard
+                    </Button>
+                  </Link>
+                  <Link to="/profile-settings">
+                    <Button variant="outline" className="w-full justify-start">
+                      <Settings className="h-4 w-4 mr-2" />
+                      Profile Settings
+                    </Button>
+                  </Link>
+                  <Button 
+                    onClick={handleLogout}
+                    variant="outline"
+                    className="w-full justify-start text-red-600"
+                  >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Log out
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+          
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">
+            Manage users, reports and settings
+          </p>
+
+          <div>
             <Link to="/dashboard">
-              <Button variant="outline" className="w-full justify-start ">
+              <Button variant="outline" className="w-full justify-start">
                 Dashboard
               </Button>
             </Link>
-            </div>
-            </div>
+          </div>
+        </div>
+
                                     
             {/* User Dropdown */}
             <div className="hidden md:flex justify-end w-full md:w-auto">
-              <DropdownMenu>
+              {/* <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="icon">
                     <User className="h-5 w-5" />
@@ -703,7 +757,7 @@ export default function AdminPanel() {
                     Log out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu> */}
             </div>
           </div>
 
