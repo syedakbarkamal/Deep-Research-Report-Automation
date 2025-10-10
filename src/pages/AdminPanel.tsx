@@ -197,7 +197,7 @@ export default function AdminPanel() {
 
   const navigate = useNavigate();
 
- useEffect(() => {
+  useEffect(() => {
     const fetchUser = async () => {
       const localRole = localStorage.getItem("role");
       const localEmail = localStorage.getItem("email");
@@ -375,8 +375,7 @@ export default function AdminPanel() {
         ]);
 
         if (userError) {
-          // If user creation fails, try to delete the auth user
-          await supabase.auth.admin.deleteUser(authData.user.id);
+          // If user creation fails, the auth user will still exist but won't have permissions
           throw userError;
         }
 
@@ -441,32 +440,70 @@ export default function AdminPanel() {
     }
 
     try {
-      const updateData: any = { name: editName, email: editEmail, role: editRole };
+      const currentUser = users.find(u => u.id === userId);
+      const { data: { user: currentAuthUser } } = await supabase.auth.getUser();
+      const isEditingSelf = currentAuthUser && currentAuthUser.id === userId;
 
-      // Update the user record
-      const { error } = await supabase.from("users").update(updateData).eq("id", userId);
+      // Update the user record in users table
+      const { error: dbError } = await supabase
+        .from("users")
+        .update({ name: editName, email: editEmail, role: editRole })
+        .eq("id", userId);
 
-      if (error) {
-        throw error;
+      if (dbError) {
+        throw dbError;
       }
 
-      // If password was changed, update it in auth
-      if (editPassword) {
-        const { error: authError } = await supabase.auth.admin.updateUserById(
-          userId,
-          { password: editPassword }
-        );
-
-        if (authError) {
-          toast({ 
-            title: "Warning", 
-            description: "User details updated but password change failed: " + authError.message 
+      // Handle auth updates only if editing own account
+      if (isEditingSelf) {
+        let successMessage = "User details updated successfully!";
+        
+        // Update password if provided
+        if (editPassword) {
+          const { error: passwordError } = await supabase.auth.updateUser({
+            password: editPassword
           });
+
+          if (passwordError) {
+            throw new Error("Password update failed: " + passwordError.message);
+          }
+          successMessage = "Password updated successfully!";
         }
+        
+        // Update email if changed (do this separately from password)
+        if (editEmail !== currentUser?.email) {
+          // For email changes, we don't need verification in admin panel
+          // Just update in auth without email confirmation
+          const { error: emailError } = await supabase.auth.updateUser({
+            email: editEmail
+          }, {
+            emailRedirectTo: undefined // Skip email verification
+          });
+
+          if (emailError) {
+            // If direct update fails, just update in database (already done above)
+            toast({ 
+              title: "Partial Update", 
+              description: "Name and role updated. Email change may require verification on next login." 
+            });
+          } else {
+            successMessage = "Account updated! Email changed successfully.";
+          }
+        }
+
+        toast({ title: "Success", description: successMessage });
+      } else {
+        // Admin is editing someone else - only name, email in DB, and role
+        toast({ 
+          title: "User Updated", 
+          description: `${editName} has been updated successfully.` 
+        });
       }
 
-      toast({ title: "User Updated", description: `${editName} has been updated.` });
+      // Clear form and refresh
       setEditingUserId(null);
+      setEditPassword("");
+      setEditConfirmPassword("");
       fetchUsers();
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -621,58 +658,54 @@ export default function AdminPanel() {
    <div className="min-h-screen bg-gradient-subtle py-1 md:py-2"> 
   <div className="container px-4">
     
-    {/* 🔹 Logo (very close to top) */}
-   {/* 🔹 Top Bar */}
-{/* 🔹 Responsive Top Bar */}
-<div className="flex items-center justify-between px-4 py-2 md:py-3 w-full">
-  {/* Left: Logo */}
-  <div className="flex-shrink-0">
-    <img 
-      src="/soundcheckinsight.png" 
-      alt="Logo" 
-      className="w-[120px] md:w-[170px] h-auto object-contain"
-    />
-  </div>
+    {/* Top Bar */}
+    <div className="flex items-center justify-between px-4 py-2 md:py-3 w-full">
+      {/* Left: Logo */}
+      <div className="flex-shrink-0">
+        <img 
+          src="/soundcheckinsight.png" 
+          alt="Logo" 
+          className="w-[120px] md:w-[170px] h-auto object-contain"
+        />
+      </div>
 
-  {/* Right: User Dropdown */}
-  <div className="flex-shrink-0">
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon">
-          <User className="h-5 w-5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuLabel>
-          <div className="flex flex-col">
-            <span className="font-medium">{userName || "Guest"}</span>
-            <span className="text-xs text-muted-foreground">
-              {userEmail || "Not signed in"}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Role: {userRole || "Unknown"}
-              {userRole === "super_admin" && " 👑"}
-            </span>
-          </div>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
-          <Settings className="mr-2 h-4 w-4" />
-          Profile Settings
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-          <LogOut className="mr-2 h-4 w-4" />
-          Log out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  </div>
-</div>
-
-
+      {/* Right: User Dropdown */}
+      <div className="flex-shrink-0">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon">
+              <User className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>
+              <div className="flex flex-col">
+                <span className="font-medium">{userName || "Guest"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {userEmail || "Not signed in"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Role: {userRole || "Unknown"}
+                  {userRole === "super_admin" && " 👑"}
+                </span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
+              <Settings className="mr-2 h-4 w-4" />
+              Profile Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+              <LogOut className="mr-2 h-4 w-4" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
 
     <div className="mb-3 md:mb-5">
-      {/* 🔹 Top Navigation (pulled upward) */}
+      {/* Top Navigation */}
       <div className="container py-1 md:py-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
         <div className="flex flex-col md:flex-row md:space-x-4 w-full md:w-auto">
           <div className="flex justify-between items-center w-full md:w-auto">
@@ -724,428 +757,408 @@ export default function AdminPanel() {
             </Link>
           </div>
         </div>
-
-                                    
-            {/* User Dropdown */}
-            <div className="hidden md:flex justify-end w-full md:w-auto">
-              {/* <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <User className="h-5 w-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{userName || "Guest"}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {userEmail || "Not signed in"}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Role: {userRole || "Unknown"}
-                        {userRole === "super_admin" && " 👑"}
-                      </span>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => navigate("/profile-settings")}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Profile Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Log out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu> */}
-            </div>
-          </div>
-
-          <Tabs defaultValue="users" className="space-y-6">
-            <TabsList className="grid w-full max-w-4xl grid-cols-2">
-              <TabsTrigger value="users">
-                <Users className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Users</span>
-              </TabsTrigger>
-              <TabsTrigger value="report-types">
-                <FileText className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Report Types</span>
-              </TabsTrigger>
-              {/* <TabsTrigger value="settings">
-                <Settings className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Settings</span>
-              </TabsTrigger> */}
-            </TabsList>
-
-            {/* Users Tab */}
-            <TabsContent value="users" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>User Management</CardTitle>
-                  <CardDescription>View and manage all registered users</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-4 flex flex-col sm:flex-row gap-3">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input 
-                        placeholder="Search users..."
-                        className="pl-8"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                                  
-                  <div className="space-y-4">
-                    {filteredUsers.length === 0 && (
-                      <p className="text-muted-foreground text-sm">No users found</p>
-                    )}
-                    {filteredUsers.map((user) => (
-                      <div
-                        key={user.id}
-                        className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted/50 rounded-lg gap-4"
-                      >
-                        <div className="flex-1">
-                          {editingUserId === user.id ? (
-                            <div className="flex flex-col gap-2">
-                              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                              <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
-                              <div className="flex items-center gap-2">
-                                <Label>Role:</Label>
-                                <select 
-                                  value={editRole}
-                                  onChange={(e) => setEditRole(e.target.value)}
-                                  className="rounded border px-2 py-1"
-                                  disabled={user.role === "super_admin" && !isSuperAdmin}
-                                >
-                                  <option value="user">User</option>
-                                  <option value="admin">Admin</option>
-                                  {isSuperAdmin && <option value="super_admin">Super Admin</option>}
-                                </select>
-                              </div>
-                              <Input type="password" placeholder="New Password (optional)" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} />
-                              <Input type="password" placeholder="Confirm New Password" value={editConfirmPassword} onChange={(e) => setEditConfirmPassword(e.target.value)} />
-                            </div>
-                          ) : (
-                            <>
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
-                                <h4 className="font-semibold">{user.name}</h4>
-                                <Badge variant={
-                                  user.role === "super_admin" ? "default" : 
-                                  user.role === "admin" ? "secondary" : "outline"
-                                }>
-                                  {user.role === "super_admin" && <Crown className="h-3 w-3 mr-1" />}
-                                  {user.role === "admin" && <Shield className="h-3 w-3 mr-1" />}
-                                  {user.role || "user"}
-                                </Badge>
-                              </div>
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-4 text-sm text-muted-foreground">
-                                <div className="flex items-center">
-                                  <Mail className="h-3 w-3 mr-1" />
-                                  <span className="truncate">{user.email}</span>
-                                </div>
-                                <div className="flex items-center">
-                                  <Calendar className="h-3 w-3 mr-1" />
-                                  Joined{" "}
-                                  {user.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}
-                                </div>
-                                <div className="flex items-center">
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  {user.report_count ?? 0} reports
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {editingUserId === user.id ? (
-                            <>
-                              <Button size="sm" onClick={() => handleSaveEdit(user.id)}>
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={handleCancelEdit}>
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              {user.role !== "super_admin" && isAdmin && (
-                                <Button variant="outline" size="sm" onClick={() => handleRoleChange(
-                                  user.id, 
-                                  user.role === "admin" ? "user" : "admin"
-                                )}>
-                                  {user.role === "admin" ? "Demote" : "Promote"}
-                                </Button>
-                              )}
-                              {isAdmin && (
-                                <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                              )}
-                              {user.role !== "super_admin" && isAdmin && (
-                                <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(user.id)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Add New User Form */}
-                  {isAdmin && (
-                    <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-                      <h4 className="font-semibold mb-3">Add New User</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <Input placeholder="Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-                        <Input type="email" placeholder="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-                        <Input type="password" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-                        <Input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-                        <div className="flex items-center gap-2">
-                          <Label>Role:</Label>
-                          <select 
-                            value={newUserRole}
-                            onChange={(e) => setNewUserRole(e.target.value)}
-                            className="rounded border px-2 py-1"
-                            disabled={!isSuperAdmin && newUserRole === "super_admin"}
-                          >
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
-                            {isSuperAdmin && <option value="super_admin">Super Admin</option>}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <Button variant="gradient" onClick={handleAddUser}><Plus className="h-4 w-4 mr-2" /> Add User</Button>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Report Types Tab */}
-            <TabsContent value="report-types" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-2xl md:text-4xl">Report Types</CardTitle>
-                  <CardDescription>Create, assign, and manage report types with custom prompts</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                    <div className="relative flex-1 w-full">
-                      <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input 
-                        placeholder="Search report types..."
-                        className="pl-8 w-full"
-                        onChange={(e) => {
-                          const q = e.target.value.toLowerCase();
-                          if (!q) {
-                            fetchReportTypes();
-                          } else {
-                            setReportTypes((prev) => prev.filter((rt) => (rt.title || "").toLowerCase().includes(q)));
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <Button size="sm" variant={reportTypeFilter === "all" ? "default" : "outline"} onClick={() => setReportTypeFilter("all")} className="flex-1 sm:flex-initial">All</Button>
-                      <Button size="sm" variant={reportTypeFilter === "active" ? "default" : "outline"} onClick={() => setReportTypeFilter("active")} className="flex-1 sm:flex-initial">Active</Button>
-                      <Button size="sm" variant={reportTypeFilter === "inactive" ? "default" : "outline"} onClick={() => setReportTypeFilter("inactive")} className="flex-1 sm:flex-initial">Inactive</Button>
-                    </div>
-                  </div>
-
-                  {/* Create Report Type */}
-                  {isAdmin && (
-                    <div className="p-4 bg-muted/50 rounded-lg mb-6">
-                      <h4 className="font-semibold mb-3">Create New Report Type</h4>
-                      <div className="grid grid-cols-1 gap-3">
-                        <Input 
-                          placeholder="Report Type Name*"
-                          value={newReportTypeTitle}
-                          onChange={(e) => setNewReportTypeTitle(e.target.value)}
-                          required
-                        />
-                        <Textarea 
-                          placeholder="Description"
-                          value={newReportTypeDescription}
-                          onChange={(e) => setNewReportTypeDescription(e.target.value)}
-                         />
-                        <div className="space-y-2">
-                          <Label>Master Prompt*</Label>
-                          <Textarea 
-                            placeholder="Enter the prompt for this report type..."
-                            value={newReportTypePrompt}
-                            onChange={(e) => setNewReportTypePrompt(e.target.value)}
-                            className="min-h-[150px] font-mono text-sm"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label>Assign To</Label>
-                          <UserMultiSelect
-                            users={users}
-                            selectedUserIds={assignUserIds}
-                            onSelectionChange={setAssignUserIds}
-                            placeholder="Select users to assign..."
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <Button variant="gradient" onClick={handleCreateReportType}><Plus className="h-4 w-4 mr-2" /> Create Report Type</Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Report Types list */}
-                  <div className="space-y-3 mt-6">
-                    {filteredReportTypes.length === 0 && <p className="text-sm text-muted-foreground">No report types found</p>}
-                    {filteredReportTypes.map((rt) => {
-                      const assignedUsers = users.filter((u) => rt.assigned_to?.includes(u.id));
-                      return (
-                        <div key={rt.id} className="p-4 bg-muted/50 rounded-lg flex flex-col md:flex-row justify-between items-start gap-4">
-                          <div className="flex-1">
-                            {editingReportTypeId === rt.id ? (
-                              <div className="space-y-3">
-                                <Input 
-                                  placeholder="Report Type Name*"
-                                  value={editReportTypeTitle}
-                                  onChange={(e) => setEditReportTypeTitle(e.target.value)}
-                                  required
-                                />
-                                <Textarea 
-                                  placeholder="Description"
-                                  value={editReportTypeDescription ?? ""}
-                                  onChange={(e) => setEditReportTypeDescription(e.target.value)}
-                                 />
-                                <div className="space-y-2">
-                                  <Label>Master Prompt*</Label>
-                                  <Textarea 
-                                    value={editReportTypePrompt}
-                                    onChange={(e) => setEditReportTypePrompt(e.target.value)}
-                                    className="min-h-[150px] font-mono text-sm"
-                                    required
-                                  />
-                                </div>
-                                <div>
-                                  <Label>Assign to</Label>
-                                  <UserMultiSelect
-                                    users={users}
-                                    selectedUserIds={editAssignUserIds}
-                                    onSelectionChange={setEditAssignUserIds}
-                                    placeholder="Select users to assign..."
-                                  />
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-1">
-                                  <h4 className="font-semibold">{rt.title}</h4>
-                                  <Badge variant={rt.status === "active" ? "default" : "secondary"}>
-                                    {rt.status === "active" ? "Active" : "Inactive"}
-                                   </Badge>
-                                </div>
-                                <p className="text-sm text-muted-foreground mb-2">{rt.description}</p>
-                                <div className="mb-3">
-                                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-                                    <FileCode className="h-4 w-4" />
-                                    <span> Master Prompt:</span>
-                                  </div>
-                                  <div className="text-xs bg-muted p-2 rounded-md overflow-hidden">
-                                    {rt.prompt.length > 150
-                                       ? `${rt.prompt.substring(0, 150)}...`
-                                       : rt.prompt}
-                                  </div>
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  Assigned to: {assignedUsers.length > 0
-                                     ? assignedUsers.map(u => u.name).join(", ")
-                                     : "All users"}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-                            {editingReportTypeId === rt.id ? (
-                              <>
-                                <div className="flex gap-2 w-full md:w-auto">
-                                  <Button size="sm" onClick={() => saveEditedReportType(rt.id)} className="flex-1 md:flex-initial"><Check className="h-4 w-4" /></Button>
-                                  <Button size="sm" variant="outline" onClick={cancelEditReportType} className="flex-1 md:flex-initial"><X className="h-4 w-4" /></Button>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                 <div className="flex flex-col gap-2 w-full md:w-auto">
-                                  {isAdmin && (
-                                    <Button size="sm" onClick={() => toggleReportTypeStatus(rt)} className="w-full md:w-auto">
-                                      {rt.status === "active" ? "Mark Inactive" : "Mark Active"}
-                                     </Button>
-                                  )}
-                                  
-                                  <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
-                                    {isAdmin && (
-                                      <div className="w-full md:w-72">
-                                        <UserMultiSelect
-                                          users={users}
-                                          selectedUserIds={rt.assigned_to || []}
-                                          onSelectionChange={(selectedIds) => handleAssignReportTypeToUsers(rt.id, selectedIds)}
-                                          placeholder="Assign users..."
-                                        />
-                                      </div>
-                                    )}
-                                    <div className="flex gap-2">
-                                      {isAdmin && (
-                                        <Button size="sm" variant="outline" onClick={() => startEditReportType(rt)} className="flex-1 md:flex-initial">
-                                          <Edit className="h-4 w-4" />
-                                        </Button>
-                                      )}
-                                      {isAdmin && (
-                                        <Button size="sm" variant="destructive" onClick={() => handleDeleteReportType(rt.id)} className="flex-1 md:flex-initial">
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Settings Tab */}
-            {/* <TabsContent value="settings" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>API Configuration</CardTitle>
-                  <CardDescription>Manage API keys and integration settings</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>OpenAI API Key</Label>
-                    <Input type="password" placeholder="sk-..." disabled />
-                    <p className="text-sm text-muted-foreground">Connect Supabase to securely store API keys</p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Google API Credentials</Label>
-                    <Input type="password" placeholder="Google OAuth Client ID" disabled />
-                    <p className="text-sm text-muted-foreground">Required for Google Docs integration</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent> */}
-          </Tabs>
-        </div>
       </div>
+
+      <Tabs defaultValue="users" className="space-y-6">
+        <TabsList className="grid w-full max-w-4xl grid-cols-2">
+          <TabsTrigger value="users">
+            <Users className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Users</span>
+          </TabsTrigger>
+          <TabsTrigger value="report-types">
+            <FileText className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Report Types</span>
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Users Tab */}
+        <TabsContent value="users" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>User Management</CardTitle>
+              <CardDescription>View and manage all registered users</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search users..."
+                    className="pl-8"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+                              
+              <div className="space-y-4">
+                {filteredUsers.length === 0 && (
+                  <p className="text-muted-foreground text-sm">No users found</p>
+                )}
+                {filteredUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted/50 rounded-lg gap-4"
+                  >
+                    <div className="flex-1">
+                      {editingUserId === user.id ? (
+                        <div className="flex flex-col gap-2">
+                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" />
+                          <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Email" />
+                          <div className="flex items-center gap-2">
+                            <Label>Role:</Label>
+                            <select 
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value)}
+                              className="rounded border px-2 py-1"
+                              disabled={user.role === "super_admin" && !isSuperAdmin}
+                            >
+                              <option value="user">User</option>
+                              <option value="admin">Admin</option>
+                              {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+                            </select>
+                          </div>
+                          {editingUserId === localStorage.getItem("userId") ? (
+                            <>
+                              <Input 
+                                type="password" 
+                                placeholder="New Password (optional)" 
+                                value={editPassword} 
+                                onChange={(e) => setEditPassword(e.target.value)} 
+                              />
+                              <Input 
+                                type="password" 
+                                placeholder="Confirm New Password" 
+                                value={editConfirmPassword} 
+                                onChange={(e) => setEditConfirmPassword(e.target.value)} 
+                              />
+                              <p className="text-xs text-muted-foreground">You can change your own password here.</p>
+                            </>
+                          ) : (
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                              <p className="text-xs text-blue-800">
+                                <strong>Password Reset:</strong> For security, admins cannot change other users' passwords. 
+                                User should use "Forgot Password" on the login page, or you can send them a password reset email.
+                              </p>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="mt-2"
+                                onClick={async () => {
+                                  const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+                                    redirectTo: `${window.location.origin}/reset-password`,
+                                  });
+                                  if (error) {
+                                    toast({ title: "Error", description: error.message, variant: "destructive" });
+                                  } else {
+                                    toast({ 
+                                      title: "Reset Email Sent", 
+                                      description: `Password reset email sent to ${user.email}` 
+                                    });
+                                  }
+                                }}
+                              >
+                                Send Password Reset Email
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
+                            <h4 className="font-semibold">{user.name}</h4>
+                            <Badge variant={
+                              user.role === "super_admin" ? "default" : 
+                              user.role === "admin" ? "secondary" : "outline"
+                            }>
+                              {user.role === "super_admin" && <Crown className="h-3 w-3 mr-1" />}
+                              {user.role === "admin" && <Shield className="h-3 w-3 mr-1" />}
+                              {user.role || "user"}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 text-sm text-muted-foreground">
+                            <div className="flex items-center">
+                              <Mail className="h-3 w-3 mr-1" />
+                              <span className="truncate">{user.email}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <Calendar className="h-3 w-3 mr-1" />
+                              Joined{" "}
+                              {user.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}
+                            </div>
+                            <div className="flex items-center">
+                              <FileText className="h-3 w-3 mr-1" />
+                              {user.report_count ?? 0} reports
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {editingUserId === user.id ? (
+                        <>
+                          <Button size="sm" onClick={() => handleSaveEdit(user.id)}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={handleCancelEdit}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          {user.role !== "super_admin" && isAdmin && (
+                            <Button variant="outline" size="sm" onClick={() => handleRoleChange(
+                              user.id, 
+                              user.role === "admin" ? "user" : "admin"
+                            )}>
+                              {user.role === "admin" ? "Demote" : "Promote"}
+                            </Button>
+                          )}
+                          {isAdmin && (
+                            <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {user.role !== "super_admin" && isAdmin && (
+                            <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(user.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add New User Form */}
+              {isAdmin && (
+                <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+                  <h4 className="font-semibold mb-3">Add New User</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Input placeholder="Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                    <Input type="email" placeholder="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+                    <Input type="password" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                    <Input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                    <div className="flex items-center gap-2">
+                      <Label>Role:</Label>
+                      <select 
+                        value={newUserRole}
+                        onChange={(e) => setNewUserRole(e.target.value)}
+                        className="rounded border px-2 py-1"
+                        disabled={!isSuperAdmin && newUserRole === "super_admin"}
+                      >
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                        {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <Button variant="gradient" onClick={handleAddUser}><Plus className="h-4 w-4 mr-2" /> Add User</Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Report Types Tab */}
+        <TabsContent value="report-types" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-2xl md:text-4xl">Report Types</CardTitle>
+              <CardDescription>Create, assign, and manage report types with custom prompts</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search report types..."
+                    className="pl-8 w-full"
+                    onChange={(e) => {
+                      const q = e.target.value.toLowerCase();
+                      if (!q) {
+                        fetchReportTypes();
+                      } else {
+                        setReportTypes((prev) => prev.filter((rt) => (rt.title || "").toLowerCase().includes(q)));
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <Button size="sm" variant={reportTypeFilter === "all" ? "default" : "outline"} onClick={() => setReportTypeFilter("all")} className="flex-1 sm:flex-initial">All</Button>
+                  <Button size="sm" variant={reportTypeFilter === "active" ? "default" : "outline"} onClick={() => setReportTypeFilter("active")} className="flex-1 sm:flex-initial">Active</Button>
+                  <Button size="sm" variant={reportTypeFilter === "inactive" ? "default" : "outline"} onClick={() => setReportTypeFilter("inactive")} className="flex-1 sm:flex-initial">Inactive</Button>
+                </div>
+              </div>
+
+              {/* Create Report Type */}
+              {isAdmin && (
+                <div className="p-4 bg-muted/50 rounded-lg mb-6">
+                  <h4 className="font-semibold mb-3">Create New Report Type</h4>
+                  <div className="grid grid-cols-1 gap-3">
+                    <Input 
+                      placeholder="Report Type Name*"
+                      value={newReportTypeTitle}
+                      onChange={(e) => setNewReportTypeTitle(e.target.value)}
+                      required
+                    />
+                    <Textarea 
+                      placeholder="Description"
+                      value={newReportTypeDescription}
+                      onChange={(e) => setNewReportTypeDescription(e.target.value)}
+                     />
+                    <div className="space-y-2">
+                      <Label>Master Prompt*</Label>
+                      <Textarea 
+                        placeholder="Enter the prompt for this report type..."
+                        value={newReportTypePrompt}
+                        onChange={(e) => setNewReportTypePrompt(e.target.value)}
+                        className="min-h-[150px] font-mono text-sm"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label>Assign To</Label>
+                      <UserMultiSelect
+                        users={users}
+                        selectedUserIds={assignUserIds}
+                        onSelectionChange={setAssignUserIds}
+                        placeholder="Select users to assign..."
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <Button variant="gradient" onClick={handleCreateReportType}><Plus className="h-4 w-4 mr-2" /> Create Report Type</Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Report Types list */}
+              <div className="space-y-3 mt-6">
+                {filteredReportTypes.length === 0 && <p className="text-sm text-muted-foreground">No report types found</p>}
+                {filteredReportTypes.map((rt) => {
+                  const assignedUsers = users.filter((u) => rt.assigned_to?.includes(u.id));
+                  return (
+                    <div key={rt.id} className="p-4 bg-muted/50 rounded-lg flex flex-col md:flex-row justify-between items-start gap-4">
+                      <div className="flex-1">
+                        {editingReportTypeId === rt.id ? (
+                          <div className="space-y-3">
+                            <Input 
+                              placeholder="Report Type Name*"
+                              value={editReportTypeTitle}
+                              onChange={(e) => setEditReportTypeTitle(e.target.value)}
+                              required
+                            />
+                            <Textarea 
+                              placeholder="Description"
+                              value={editReportTypeDescription ?? ""}
+                              onChange={(e) => setEditReportTypeDescription(e.target.value)}
+                             />
+                            <div className="space-y-2">
+                              <Label>Master Prompt*</Label>
+                              <Textarea 
+                                value={editReportTypePrompt}
+                                onChange={(e) => setEditReportTypePrompt(e.target.value)}
+                                className="min-h-[150px] font-mono text-sm"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label>Assign to</Label>
+                              <UserMultiSelect
+                                users={users}
+                                selectedUserIds={editAssignUserIds}
+                                onSelectionChange={setEditAssignUserIds}
+                                placeholder="Select users to assign..."
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-1">
+                              <h4 className="font-semibold">{rt.title}</h4>
+                              <Badge variant={rt.status === "active" ? "default" : "secondary"}>
+                                {rt.status === "active" ? "Active" : "Inactive"}
+                               </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-2">{rt.description}</p>
+                            <div className="mb-3">
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                                <FileCode className="h-4 w-4" />
+                                <span> Master Prompt:</span>
+                              </div>
+                              <div className="text-xs bg-muted p-2 rounded-md overflow-hidden">
+                                {rt.prompt.length > 150
+                                   ? `${rt.prompt.substring(0, 150)}...`
+                                   : rt.prompt}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Assigned to: {assignedUsers.length > 0
+                                 ? assignedUsers.map(u => u.name).join(", ")
+                                 : "All users"}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                        {editingReportTypeId === rt.id ? (
+                          <>
+                            <div className="flex gap-2 w-full md:w-auto">
+                              <Button size="sm" onClick={() => saveEditedReportType(rt.id)} className="flex-1 md:flex-initial"><Check className="h-4 w-4" /></Button>
+                              <Button size="sm" variant="outline" onClick={cancelEditReportType} className="flex-1 md:flex-initial"><X className="h-4 w-4" /></Button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                             <div className="flex flex-col gap-2 w-full md:w-auto">
+                              {isAdmin && (
+                                <Button size="sm" onClick={() => toggleReportTypeStatus(rt)} className="w-full md:w-auto">
+                                  {rt.status === "active" ? "Mark Inactive" : "Mark Active"}
+                                 </Button>
+                              )}
+                              
+                              <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+                                {isAdmin && (
+                                  <div className="w-full md:w-72">
+                                    <UserMultiSelect
+                                      users={users}
+                                      selectedUserIds={rt.assigned_to || []}
+                                      onSelectionChange={(selectedIds) => handleAssignReportTypeToUsers(rt.id, selectedIds)}
+                                      placeholder="Assign users..."
+                                    />
+                                  </div>
+                                )}
+                                <div className="flex gap-2">
+                                  {isAdmin && (
+                                    <Button size="sm" variant="outline" onClick={() => startEditReportType(rt)} className="flex-1 md:flex-initial">
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                  {isAdmin && (
+                                    <Button size="sm" variant="destructive" onClick={() => handleDeleteReportType(rt.id)} className="flex-1 md:flex-initial">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
+  </div>
+</div>
   );
 }

@@ -13,6 +13,7 @@ import NotFound from "./pages/NotFound";
 import ResearchStatusCard from "./pages/ResearchStatusCard";
 import ReportDetails from "./pages/ReportDetails";
 import Profile from "./pages/profile";
+import ResetPassword from "./pages/ResetPassword";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,8 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/new-report" element={<NewReport />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+
 <Route path="/research-status-card" element={<ResearchStatusCard reportId={""} reportName={""} clientName={""} status={""} createdAt={""} />} />
         <Route path="/report/:id" element={<ReportDetails />} />
 
