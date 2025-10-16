@@ -43,6 +43,8 @@ import {
   Menu,
   Search,
   FileCode,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -195,6 +197,14 @@ export default function AdminPanel() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // API Keys state
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [googleClientSecret, setGoogleClientSecret] = useState("");
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [showGoogleSecret, setShowGoogleSecret] = useState(false);
+  const [isLoadingKeys, setIsLoadingKeys] = useState(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -237,8 +247,95 @@ export default function AdminPanel() {
     fetchUser();
     fetchUsers();
     fetchReportTypes();
+    fetchApiKeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * ------------------------
+   * API Keys Management
+   * -------------------------*/
+  const fetchApiKeys = async () => {
+    setIsLoadingKeys(true);
+    try {
+      const { data, error } = await supabase
+        .from("api_keys")
+        .select("*")
+        .single();
+
+      if (error && error.code !== "PGRST116") { // PGRST116 = no rows returned
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+      } else if (data) {
+        setOpenaiApiKey(data.openai_key || "");
+        setGoogleClientId(data.google_client_id || "");
+        setGoogleClientSecret(data.google_client_secret || "");
+      }
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsLoadingKeys(false);
+    }
+  };
+
+  const handleSaveApiKeys = async () => {
+    if (userRole !== "super_admin") {
+      toast({ 
+        title: "Permission Denied", 
+        description: "Only super admins can update API keys", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    setIsLoadingKeys(true);
+    try {
+      // Check if a record exists
+      const { data: existing } = await supabase
+        .from("api_keys")
+        .select("id")
+        .single();
+
+      const apiKeyData = {
+        openai_key: openaiApiKey,
+        google_client_id: googleClientId,
+        google_client_secret: googleClientSecret,
+        updated_at: new Date().toISOString(),
+      };
+
+      let error;
+      if (existing) {
+        // Update existing record
+        const result = await supabase
+          .from("api_keys")
+          .update(apiKeyData)
+          .eq("id", existing.id);
+        error = result.error;
+      } else {
+        // Insert new record
+        const result = await supabase
+          .from("api_keys")
+          .insert([{ ...apiKeyData, created_at: new Date().toISOString() }]);
+        error = result.error;
+      }
+
+      if (error) {
+        throw error;
+      }
+
+      toast({ 
+        title: "Success", 
+        description: "API keys saved successfully" 
+      });
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsLoadingKeys(false);
+    }
+  };
 
   /**
    * ------------------------
@@ -760,7 +857,7 @@ export default function AdminPanel() {
       </div>
 
       <Tabs defaultValue="users" className="space-y-6">
-        <TabsList className="grid w-full max-w-4xl grid-cols-2">
+        <TabsList className="grid w-full max-w-4xl grid-cols-3">
           <TabsTrigger value="users">
             <Users className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Users</span>
@@ -768,6 +865,10 @@ export default function AdminPanel() {
           <TabsTrigger value="report-types">
             <FileText className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Report Types</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings">
+            <Settings className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Settings</span>
           </TabsTrigger>
         </TabsList>
 
@@ -962,6 +1063,7 @@ export default function AdminPanel() {
             </CardContent>
           </Card>
         </TabsContent>
+        
 
         {/* Report Types Tab */}
         <TabsContent value="report-types" className="space-y-4">
@@ -1156,6 +1258,129 @@ export default function AdminPanel() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Settings Tab */}
+        <TabsContent value="settings" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>API Configuration</CardTitle>
+              <CardDescription>
+                Manage API keys and integration settings
+                {!isSuperAdmin && " (Super Admin access required)"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {isLoadingKeys ? (
+                <p className="text-sm text-muted-foreground">Loading API keys...</p>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="openai-key">OpenAI API Key</Label>
+                    <div className="relative">
+                      <Input
+                        id="openai-key"
+                        type={showOpenaiKey ? "text" : "password"}
+                        placeholder="sk-..."
+                        value={openaiApiKey}
+                        onChange={(e) => setOpenaiApiKey(e.target.value)}
+                        disabled={!isSuperAdmin}
+                        className="pr-20"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                        onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                        disabled={!isSuperAdmin}
+                      >
+                        {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Required for AI report generation
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="google-client-id">Google OAuth Client ID</Label>
+                    <Input
+                      id="google-client-id"
+                      type="text"
+                      placeholder="123456789-abc..."
+                      value={googleClientId}
+                      onChange={(e) => setGoogleClientId(e.target.value)}
+                      disabled={!isSuperAdmin}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Required for Google Docs integration
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="google-client-secret">Google OAuth Client Secret</Label>
+                    <div className="relative">
+                      <Input
+                        id="google-client-secret"
+                        type={showGoogleSecret ? "text" : "password"}
+                        placeholder="GOCSPX-..."
+                        value={googleClientSecret}
+                        onChange={(e) => setGoogleClientSecret(e.target.value)}
+                        disabled={!isSuperAdmin}
+                        className="pr-20"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                        onClick={() => setShowGoogleSecret(!showGoogleSecret)}
+                        disabled={!isSuperAdmin}
+                      >
+                        {showGoogleSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Keep this secret secure
+                    </p>
+                  </div>
+
+                  {isSuperAdmin && (
+                    <div className="pt-4">
+                      <Button 
+                        onClick={handleSaveApiKeys}
+                        disabled={isLoadingKeys}
+                        className="w-full sm:w-auto"
+                      >
+                        <Save className="h-4 w-4 mr-2" />
+                        {isLoadingKeys ? "Saving..." : "Save API Keys"}
+                      </Button>
+                    </div>
+                  )}
+
+                  {!isSuperAdmin && (
+                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <p className="text-sm text-yellow-800">
+                        <strong>Note:</strong> Only Super Admins can view and update API keys for security reasons.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="pt-6 border-t">
+                    <h4 className="font-semibold mb-2">Security Best Practices</h4>
+                    <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                      <li>Rotate API keys regularly (every 90 days recommended)</li>
+                      <li>Never share API keys with unauthorized users</li>
+                      <li>Monitor API usage for unusual activity</li>
+                      <li>Use environment-specific keys (dev/staging/prod)</li>
+                    </ul>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
     </div>
   </div>
